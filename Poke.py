@@ -108,6 +108,62 @@ SERVER_DICT[ID] = SERVER(ID, Group3, GodPack3, DETECT, POSTING, COMMAND, MUSEUM,
 
 
 
+ID   = "os.getenv('GIST_ID_2')"
+NAME = "Group4"
+Group4 = TEXT(ID, NAME, False)
+
+ID   = "os.getenv('GIST_ID_3')"
+NAME = "GodPack4"
+GodPack4 = JSON(ID, NAME)
+
+ID      = 1358035181260242965
+DETECT  = 1358035153959649393
+POSTING = 1358035020354158663
+COMMAND = 1358035085722390658
+MUSEUM  = 1358035213845922033
+TAG = {
+        "Yet"    : 1358035845889786015,
+        "Good"   : 1358035893797126156,
+        "Bad"    : 1358035937040404642,
+        "1P"     : 1358035423171182703,
+        "2P"     : 1358035547217596467,
+        "3P"     : 1358035601127116873,
+        "4P"     : 1358035648568885379,
+        "5P"     : 1358035696652390610,
+        "Notice" : 1358035798854865048
+}
+SERVER_DICT[ID] = SERVER(ID, Group4, GodPack4, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+
+
+
+ID   = "os.getenv('GIST_ID_2')"
+NAME = "Group5"
+Group5 = TEXT(ID, NAME, False)
+
+ID   = "os.getenv('GIST_ID_3')"
+NAME = "GodPack5"
+GodPack5 = JSON(ID, NAME)
+
+ID      = 1358091689742438522
+DETECT  = 1358091656762753187
+POSTING = 1358091549329588254
+COMMAND = 1358091614114812194
+MUSEUM  = 1358091791936655500
+TAG = {
+        "Yet"    : 1358092190147936453,
+        "Good"   : 1358092163761705202,
+        "Bad"    : 1358092171605053547,
+        "1P"     : 1358092115107643512,
+        "2P"     : 1358092125006462976,
+        "3P"     : 1358092134103650314,
+        "4P"     : 1358092142668681388,
+        "5P"     : 1358092155230621928,
+        "Notice" : 1358092199740571828
+}
+SERVER_DICT[ID] = SERVER(ID, Group5, GodPack5, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+
+
+
 
 #  봇 권한 설정
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
@@ -163,6 +219,16 @@ async def safe_history(thread, retries=5):
             print(f"⚠️ 메시지 가져오기 실패 (시도 {attempt + 1}/{retries}): {e}")
             await asyncio.sleep(2 ** attempt)
     print(f"⛔ 최종 실패: {thread.name}")
+    return None
+
+async def safe_fetch_channel(channel, retries=5):
+    for attempt in range(retries):
+        try:
+            return bot.fetch_channel(channel)
+        except Exception as e:
+            print(f"⚠️ 채널 가져오기 실패 (시도 {attempt + 1}/{retries}): {e}")
+            await asyncio.sleep(2 ** attempt)
+    print(f"⛔ 최종 실패: {channel}")
     return None
 
 async def recent_godpack(Server):
@@ -528,6 +594,21 @@ async def on_message(message):
             Server = SERVER_DICT[message.channel.id]
             name = message.content.split("\n")[0].strip()
             if name in USER_DICT.keys():
+                """
+                if Server.FILE.NAME == 'Group1':
+                    Another = SERVER_DICT[os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')]
+                    USER_DICT[name].called(Another, message)
+                    if USER_DICT[name].CODE not in Another.FILE.DATA:
+                        USER_DICT[name].online(Another)
+                        Another.FILE.update()
+                    
+                if Server.FILE.NAME == 'Group3':
+                    Another = SERVER_DICT[os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')]
+                    USER_DICT[name].called(Another, message)
+                    if USER_DICT[name].CODE not in Another.FILE.DATA:
+                        USER_DICT[name].online(Another)
+                        Another.FILE.update()
+                """
                 USER_DICT[name].called(Server, message)
                 if USER_DICT[name].CODE not in Server.FILE.DATA:
                     print(f"✅ 수집된 이름: {name}, 코드 : {USER_DICT[name].CODE}")
@@ -558,7 +639,15 @@ async def on_message(message):
         for Server in SERVER_DICT.values():
             if message.channel.id == Server.DETECT:
                 break
-        
+        """
+        if Server.FILE.NAME == 'Group1':
+            Another = SERVER_DICT[os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')]
+        elif Server.FILE.NAME == 'Group3':
+            Another = SERVER_DICT[os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')]
+        else :
+            Another = None
+        """
+        Another = None
         if "Invalid" in message.content:
             print("Invalid God Pack 을 찾았습니다.")
             return
@@ -566,11 +655,16 @@ async def on_message(message):
         elif "found by" in message.content:
             print("Pseudo God Pack 을 찾았습니다.")
             inform, title = Server.found_Pseudo(message)
+            if Another :
+                inform_, title_ = Another.found_Pseudo(message)
             
             if inform and title :
                 images = message.attachments
                 forum_channel = bot.get_channel(Server.POSTING)
                 await Server.Post(forum_channel, images, inform, title)
+                if Another :
+                    forum_channel = bot.get_channel(Another.POSTING)
+                    await Another.Post(forum_channel, images, inform, title)
             else :
                 print("메시지에 오류가 있었습니다")
 
@@ -578,11 +672,16 @@ async def on_message(message):
         elif "Valid" in message.content :
             print("God Pack 을 찾았습니다!")
             inform, title = Server.found_GodPack(message)
+            if Another :
+                inform_, title_ = Another.found_GodPack(message)
             
             if inform and title :
                 images = message.attachments
                 forum_channel = bot.get_channel(Server.POSTING)
                 await Server.Post(forum_channel, images, inform, title)
+                if Another :
+                    forum_channel = bot.get_channel(Another.POSTING)
+                    await Another.Post(forum_channel, images, inform, title)
             else :
                 print("메시지에 오류가 있었습니다")
                 
@@ -718,7 +817,8 @@ async def yet(ctx):
     
     if yet_list or recent_good_list:
         total_message = "\n".join(total_list)
-        await ctx.send(f"```최근 축팩 및 미검증 리스트 {len(total_list)}\n(** : 2일 미만, * : 4일 미만)\n{total_message}```")
+        full_message  = f"최근 축팩 및 미검증 리스트 {len(total_list)}\n(** : 2일 미만, * : 4일 미만)\n{total_message}"
+        await safe_send(ctx, full_message, True)
     else:
         await ctx.send("축팩 및 미검증이 없습니다.")
         
@@ -954,7 +1054,8 @@ async def custom(ctx):
     
     if yet_list or recent_good_list:
         total_message = "\n".join(total_list)
-        await ctx.send(f"```최근 축팩 및 미검증 리스트 {len(total_list)}\n(** : 2일 미만, * : 4일 미만)\n{total_message}```")
+        full_message  = f"최근 축팩 및 미검증 리스트 {len(total_list)}\n(** : 2일 미만, * : 4일 미만)\n{total_message}"
+        await safe_send(ctx, full_message, True)
     else:
         await ctx.send("축팩 및 미검증이 없습니다.")    
 
