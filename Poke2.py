@@ -7,6 +7,7 @@ import re
 import shutil
 import logging # 로깅 모듈 추가
 import random # Added import
+import glob # glob 모듈 임포트 추가
 
 # --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
@@ -152,13 +153,25 @@ def read_heartbeat_data(user_name):
     return []
 
 def write_heartbeat_data(user_name, data_list):
-    """사용자 Heartbeat 기록 리스트를 JSON 파일에 쓰기 (정렬 포함)"""
+    """사용자 Heartbeat 기록 리스트를 JSON 파일에 쓰기 (정렬 포함) 및 _last.json 업데이트"""
     filepath = get_data_filepath(user_name, HEARTBEAT_DATA_DIR)
+    success = False
     try:
         data_list.sort(key=lambda x: x.get('timestamp', '')) # 쓰기 전 정렬 보장
-        return write_json_file(filepath, data_list, "Heartbeat", user_name)
-    except Exception as e: # 정렬 중 오류 발생 가능성 (매우 낮음)
-        logging.error(f"❌ 사용자 '{user_name}' Heartbeat 데이터 정렬 중 오류: {e}", exc_info=True)
+        if write_json_file(filepath, data_list, "Heartbeat", user_name):
+            success = True
+            # --- _last.json 업데이트 로직 추가 ---
+            if data_list: # 데이터가 있을 경우에만 최신 기록 저장
+                latest_record = data_list[-1] # 정렬 후 마지막 요소가 최신
+                last_filepath = filepath.replace(".json", "_last.json")
+                last_data = {"latest_record": latest_record}
+                if not write_json_file(last_filepath, last_data, "최신 Heartbeat", user_name):
+                    logging.warning(f"⚠️ 사용자 '{user_name}'의 최신 Heartbeat 파일(_last.json) 쓰기 실패: {last_filepath}")
+                    # _last.json 쓰기 실패는 전체 작업 실패로 간주하지 않음 (선택적)
+            # --- _last.json 업데이트 로직 끝 ---
+        return success # 기본 파일 쓰기 성공 여부 반환
+    except Exception as e: # 정렬 중 오류 발생 가능성
+        logging.error(f"❌ 사용자 '{user_name}' Heartbeat 데이터 처리(정렬/쓰기) 중 오류: {e}", exc_info=True)
         return False
 
 # --- 데이터 처리 함수 (User Profile) ---
@@ -362,40 +375,57 @@ async def on_ready():
 
     await update_user_profiles_from_source()
 
-    # 누락된 Heartbeat 기록 스캔
+    # --- 누락된 Heartbeat 기록 스캔 최적화 ---
+    logging.info("🔍 최신 Heartbeat 타임스탬프 찾는 중 (_last.json 파일 스캔)...")
     overall_latest_timestamp = None
-    if heartbeat_records:
-        timestamps = []
-        for user_name, data in heartbeat_records.items():
-            record = data.get("latest_record")
-            if record and 'timestamp' in record:
-                try:
-                    ts_str = record['timestamp']
-                    ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                    if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
-                    timestamps.append(ts)
-                except ValueError:
-                    logging.warning(f"⚠️ 사용자 '{user_name}'의 잘못된 타임스탬프 형식 발견 (로드 중): {record.get('timestamp')}")
-        if timestamps:
-            overall_latest_timestamp = max(timestamps)
+    last_files = glob.glob(os.path.join(HEARTBEAT_DATA_DIR, "*_last.json"))
+    logging.info(f"  발견된 _last.json 파일 수: {len(last_files)}")
+
+    processed_files = 0
+    for last_file in last_files:
+        processed_files += 1
+        if processed_files % 500 == 0: # 많은 파일 처리 시 로그 출력
+             logging.info(f"  {processed_files}/{len(last_files)} 개의 _last.json 파일 처리 중...")
+        try:
+            with open(last_file, 'r', encoding='utf-8') as f:
+                last_data = json.load(f)
+                if "latest_record" in last_data and "timestamp" in last_data["latest_record"]:
+                    ts_str = last_data["latest_record"]["timestamp"]
+                    try:
+                        ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                        if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+
+                        if overall_latest_timestamp is None or ts > overall_latest_timestamp:
+                            overall_latest_timestamp = ts
+                    except ValueError:
+                        logging.warning(f"⚠️ 파일 '{os.path.basename(last_file)}'의 잘못된 타임스탬프 형식 발견: {ts_str}")
+        except json.JSONDecodeError:
+            logging.warning(f"⚠️ 파일 '{os.path.basename(last_file)}' 읽기/파싱 오류 (JSON 형식 오류)")
+        except IOError as e:
+            logging.warning(f"⚠️ 파일 '{os.path.basename(last_file)}' 읽기 오류: {e}")
+        except Exception as e:
+             logging.error(f"❌ _last.json 파일 처리 중 예상치 못한 오류 ({os.path.basename(last_file)}): {e}")
+
 
     if overall_latest_timestamp:
-        logging.info(f"🔄 마지막 Heartbeat 기록 ({overall_latest_timestamp.isoformat()}) 이후 메시지 스캔")
+        logging.info(f"📊 전체 사용자 중 가장 최신 Heartbeat 타임스탬프: {overall_latest_timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     else:
-        logging.info("🔄 저장된 Heartbeat 기록 없음. 전체 채널 히스토리 스캔...")
+        logging.info("📊 기록된 최신 Heartbeat 타임스탬프를 찾지 못했습니다. (모든 메시지를 스캔할 수 있음)")
+    # --- 누락된 Heartbeat 기록 스캔 최적화 끝 ---
 
-    history_processed_count = 0
+    logging.info("📡 감시 채널 스캔 시작...")
     total_scanned = 0
-    scan_start_time = datetime.now()
+    history_processed_count = 0
 
-    for channel_id, channel_name in TARGET_CHANNEL_IDS.items():
-        channel_id_str = str(channel_id)
-        scan_type = '누락분만' if overall_latest_timestamp else '전체'
-        logging.info(f"  [{channel_name}] 채널 기록 조회 중... ({scan_type})")
+    # 채널별 스캔 시작 (overall_latest_timestamp 사용)
+    for channel_id_str, channel_name in TARGET_CHANNEL_IDS.items():
+        channel_id = int(channel_id_str)
+        logging.info(f"  채널 스캔 중: {channel_name} ({channel_id})...")
         channel_processed_count = 0
         channel_scanned = 0
         try:
             channel = await bot.fetch_channel(channel_id)
+            # overall_latest_timestamp가 있으면 그 이후만, 없으면 최근 10000개 (또는 전체)
             history_iterator = channel.history(limit=None, after=overall_latest_timestamp, oldest_first=True) if overall_latest_timestamp else channel.history(limit=10000, oldest_first=True)
 
             async for message in history_iterator:
@@ -408,22 +438,20 @@ async def on_ready():
                     logging.info(f"    [{channel_name}] {channel_scanned}개 메시지 스캔됨...")
 
             logging.info(f"    [{channel_name}] 스캔 완료 ({channel_scanned}개 스캔, {channel_processed_count}개 신규 처리).")
-        except discord.NotFound:
-            logging.error(f"❌ [{channel_name}] 채널({channel_id})을 찾을 수 없습니다. 건너뜁니다.")
-        except discord.Forbidden:
-            logging.error(f"❌ [{channel_name}] 채널({channel_id}) 접근 권한이 없습니다. 건너뜁니다.")
-        except discord.HTTPException as e:
-             logging.error(f"❌ [{channel_name}] 채널 기록 조회 중 Discord API 오류: {e}", exc_info=True)
-        except Exception as e:
-            logging.error(f"❌ [{channel_name}] 채널 기록 조회 중 예상치 못한 오류: {e}", exc_info=True)
 
-    scan_end_time = datetime.now()
-    scan_duration = scan_end_time - scan_start_time
-    logging.info(f"✅ 전체 채널 히스토리 스캔 완료 ({total_scanned}개 스캔, {history_processed_count}개 신규 Heartbeat 처리됨). 소요 시간: {scan_duration}")
+        except discord.NotFound:
+            logging.error(f"❌ 채널을 찾을 수 없음: {channel_name} ({channel_id})")
+        except discord.Forbidden:
+            logging.error(f"❌ 채널 접근 권한 없음: {channel_name} ({channel_id})")
+        except Exception as e:
+            logging.error(f"❌ 채널 '{channel_name}' 스캔 중 오류 발생: {e}")
+            import traceback
+            traceback.print_exc() # 상세 오류 출력
+
+    logging.info(f"📡 전체 채널 스캔 완료 (총 {total_scanned}개 스캔, {history_processed_count}개 신규 처리).")
     logging.info(f'👂 감시 채널: {list(TARGET_CHANNEL_IDS.values())}')
     logging.info("--- 초기화 완료 ---")
 
-    # 초기 스캔 완료 이벤트 설정
     initial_scan_complete_event.set()
     logging.info("🏁 초기 스캔 완료 이벤트 설정됨. 주기적 상태 확인 시작 가능.")
 
