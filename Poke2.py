@@ -432,10 +432,10 @@ async def check_heartbeat_status():
     """주기적으로 메모리 기반 사용자 상태 확인 (User 프로필 및 Heartbeat 기록 활용)"""
     await bot.wait_until_ready()
     while not bot.is_closed():
-        await asyncio.sleep(60) # 60초 간격
+        await asyncio.sleep(5) # 60초 간격
 
         now_utc = datetime.now(timezone.utc)
-        offline_threshold = timedelta(minutes=10)
+        offline_threshold = timedelta(minutes=15)
 
         # 로깅보다는 print가 적합한 상태 표시
         print("\n--- 사용자 상태 확인 ---")
@@ -499,17 +499,19 @@ async def check_heartbeat_status():
         # 결과 출력 (여전히 print 사용)
         print(f"--- 확인 시간: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} ---")
         print(f"--- Online ({len(online_users_status)}명) ---")
-        if online_users_status:
-            for status in online_users_status: print(f"  {status}")
-        else:
-            print("  없음")
+        # if online_users_status:
+            # for status in online_users_status: print(f"  {status}")
+        # else:
+        #     print("  없음")
 
         print(f"--- Offline ({len(offline_users_status)}명) ---")
-        if offline_users_status:
-            for status in offline_users_status: print(f"  {status}")
-        else:
-            print("  없음")
+        # if offline_users_status:
+        #     for status in offline_users_status: print(f"  {status}")
+        # else:
+        #     print("  없음")
         print("----------------------------------------------\n")
+        await asyncio.sleep(55) # 60초 간격
+
 
 async def main():
     """메인 실행 함수"""
