@@ -13,14 +13,43 @@ import glob # glob 모듈 임포트 추가
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 # --- 상수 정의 ---
+# Heartbeat 관련 채널 (기존)
 GROUP1_CHANNEL_ID = os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')
 GROUP3_CHANNEL_ID = os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')
-TARGET_CHANNEL_IDS = {GROUP1_CHANNEL_ID: "Group1", GROUP3_CHANNEL_ID: "Group3"}
+HEARTBEAT_TARGET_CHANNEL_IDS = {GROUP1_CHANNEL_ID: "Group1", GROUP3_CHANNEL_ID: "Group3"} # 이름 변경: Heartbeat 채널임을 명시
+
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN') # 봇 토큰
 
 HEARTBEAT_DATA_DIR = "data/heartbeat_data" # 데이터 저장 폴더
 USER_DATA_DIR = "data/user_data" # 사용자 프로필 데이터 저장 폴더
 USER_INFO_SOURCE_URL = "os.getenv('PASTEBIN_URL')" # 사용자 정보 소스 URL
+
+# --- 그룹 설정 (newGroup.py 정보 기반) ---
+GROUP_CONFIGS = [
+    {
+        "NAME": "Group6",
+        "HEARTBEAT_ID": os.getenv('DISCORD_GROUP1_HEARTBEAT_ID'), # Heartbeat (예시, 실제 그룹 ID에 맞게 조정 필요)
+        "DETECT_ID": os.getenv('DISCORD_GROUP6_DETECT_ID'), # GP webhook
+        "POSTING_ID": os.getenv('DISCORD_GROUP6_POSTING_ID'),
+        "COMMAND_ID": 1356656481180848195,
+        "MUSEUM_ID": os.getenv('DISCORD_GROUP6_MUSEUM_ID'),
+        "TAGS": {
+            "Yet": os.getenv('DISCORD_GROUP6_TAG_YET'),
+            "Good": os.getenv('DISCORD_GROUP6_TAG_GOOD'),
+            "Bad": os.getenv('DISCORD_GROUP6_TAG_BAD'),
+            "1P": os.getenv('DISCORD_GROUP6_TAG_1P'),
+            "2P": os.getenv('DISCORD_GROUP6_TAG_2P'),
+            "3P": os.getenv('DISCORD_GROUP6_TAG_3P'),
+            "4P": os.getenv('DISCORD_GROUP6_TAG_4P'),
+            "5P": os.getenv('DISCORD_GROUP6_TAG_5P'),
+            "Notice": os.getenv('DISCORD_GROUP6_TAG_NOTICE')
+        }
+    }
+    # 다른 그룹 설정을 여기에 딕셔너리로 추가
+    # {
+    #     "NAME": "Group7", ...
+    # },
+]
 
 # --- 봇 설정 ---
 intents = discord.Intents.default()
@@ -37,7 +66,7 @@ heartbeat_records = {}
 user_profiles = {}
 
 # 테스트 플래그
-test_flag = True # True로 설정 시 모든 등록 유저를 온라인으로 간주
+test_flag = True # True로 설정 시 모든 등록 유저를 온라인으로 간주, False로 설정 시 온라인 유저만 감지
 
 # asyncio 이벤트 추가
 initial_scan_complete_event = asyncio.Event()
@@ -418,38 +447,48 @@ async def on_ready():
     history_processed_count = 0
 
     # 채널별 스캔 시작 (overall_latest_timestamp 사용)
-    for channel_id_str, channel_name in TARGET_CHANNEL_IDS.items():
-        channel_id = int(channel_id_str)
-        logging.info(f"  채널 스캔 중: {channel_name} ({channel_id})...")
-        channel_processed_count = 0
-        channel_scanned = 0
-        try:
-            channel = await bot.fetch_channel(channel_id)
-            # overall_latest_timestamp가 있으면 그 이후만, 없으면 최근 10000개 (또는 전체)
-            history_iterator = channel.history(limit=None, after=overall_latest_timestamp, oldest_first=True) if overall_latest_timestamp else channel.history(limit=10000, oldest_first=True)
+    for config in GROUP_CONFIGS:
+        group_name = config.get("NAME", "Unnamed Group")
+        channel_id = config.get("HEARTBEAT_ID")
+        if channel_id:
+            logging.info(f"  채널 스캔 중: {group_name} ({channel_id})...")
+            channel_processed_count = 0
+            channel_scanned = 0
+            try:
+                channel = await bot.fetch_channel(channel_id)
+                # overall_latest_timestamp가 있으면 그 이후만, 없으면 최근 10000개 (또는 전체)
+                history_iterator = channel.history(limit=None, after=overall_latest_timestamp, oldest_first=True) if overall_latest_timestamp else channel.history(limit=10000, oldest_first=True)
 
-            async for message in history_iterator:
-                channel_scanned += 1
-                total_scanned += 1
-                if await process_heartbeat_message(message, channel_id_str, channel_name):
-                    channel_processed_count += 1
-                    history_processed_count += 1
-                if channel_scanned % 2000 == 0:
-                    logging.info(f"    [{channel_name}] {channel_scanned}개 메시지 스캔됨...")
+                async for message in history_iterator:
+                    channel_scanned += 1
+                    total_scanned += 1
+                    if await process_heartbeat_message(message, str(channel_id), group_name):
+                        channel_processed_count += 1
+                        history_processed_count += 1
+                    if channel_scanned % 2000 == 0:
+                        logging.info(f"    [{group_name}] {channel_scanned}개 메시지 스캔됨...")
 
-            logging.info(f"    [{channel_name}] 스캔 완료 ({channel_scanned}개 스캔, {channel_processed_count}개 신규 처리).")
+                logging.info(f"    [{group_name}] 스캔 완료 ({channel_scanned}개 스캔, {channel_processed_count}개 신규 처리).")
 
-        except discord.NotFound:
-            logging.error(f"❌ 채널을 찾을 수 없음: {channel_name} ({channel_id})")
-        except discord.Forbidden:
-            logging.error(f"❌ 채널 접근 권한 없음: {channel_name} ({channel_id})")
-        except Exception as e:
-            logging.error(f"❌ 채널 '{channel_name}' 스캔 중 오류 발생: {e}")
-            import traceback
-            traceback.print_exc() # 상세 오류 출력
+            except discord.NotFound:
+                logging.error(f"❌ 채널을 찾을 수 없음: {group_name} ({channel_id})")
+            except discord.Forbidden:
+                logging.error(f"❌ 채널 접근 권한 없음: {group_name} ({channel_id})")
+            except Exception as e:
+                logging.error(f"❌ 채널 '{group_name}' 스캔 중 오류 발생: {e}")
+                import traceback
+                traceback.print_exc() # 상세 오류 출력
 
     logging.info(f"📡 전체 채널 스캔 완료 (총 {total_scanned}개 스캔, {history_processed_count}개 신규 처리).")
-    logging.info(f'👂 감시 채널: {list(TARGET_CHANNEL_IDS.values())}')
+    # 감시 채널 로깅 업데이트 (Heartbeat 및 Detect 채널 포함)
+    monitored_channels = []
+    for config in GROUP_CONFIGS:
+        group_name = config.get("NAME", "Unnamed Group")
+        if config.get("HEARTBEAT_ID"):
+            monitored_channels.append(f"{group_name}-Heartbeat ({config['HEARTBEAT_ID']})")
+        if config.get("DETECT_ID"):
+            monitored_channels.append(f"{group_name}-Detect ({config['DETECT_ID']})")
+    logging.info(f'👂 감시 채널: {", ".join(monitored_channels)}')
     logging.info("--- 초기화 완료 ---")
 
     initial_scan_complete_event.set()
@@ -459,59 +498,48 @@ async def on_ready():
 async def on_message(message):
     """메시지 수신 시 실시간 처리"""
     if message.author == bot.user: return # 봇 메시지 무시
-    if message.channel.id in TARGET_CHANNEL_IDS: # 대상 채널만 처리
-        channel_id_str = str(message.channel.id)
-        channel_name = TARGET_CHANNEL_IDS[message.channel.id]
+
+    channel_id = message.channel.id
+
+    # 모든 그룹 설정을 순회하며 해당 채널이 어떤 그룹의 어떤 채널인지 확인
+    for config in GROUP_CONFIGS:
+        group_name = config.get("NAME", "Unnamed Group")
+        # Heartbeat 채널 확인 (기존 로직과 유사)
+        heartbeat_channel_id = config.get("HEARTBEAT_ID")
+        if heartbeat_channel_id and channel_id == heartbeat_channel_id:
+            channel_id_str = str(channel_id)
+            channel_name_for_log = f"{group_name}-Heartbeat" # 로그용 채널 이름
+            # logging.info(f"Processing Heartbeat for {group_name}...") # 디버깅 로그 필요 시
+            await process_heartbeat_message(message, channel_id_str, channel_name_for_log)
+            return # 메시지 처리가 완료되었으므로 루프 종료
+
+        # GP 결과 감지 채널 확인 (신규 추가)
+        detect_channel_id = config.get("DETECT_ID")
+        if detect_channel_id and channel_id == detect_channel_id:
+            # logging.info(f"Processing GP Result for {group_name}...") # 디버깅 로그 필요 시
+            await process_gp_result_message(message, config)
+            return # 메시지 처리가 완료되었으므로 루프 종료
+
+        # TODO: COMMAND 채널 처리 로직 추가 필요
+        # command_channel_id = config.get("COMMAND_ID")
+        # if command_channel_id and channel_id == command_channel_id:
+        #     await process_command(message, config)
+        #     return
+
+    # 기존 TARGET_CHANNEL_IDS 기반 Heartbeat 처리 (하위 호환 또는 다른 그룹용으로 남겨둘 수 있음)
+    # 만약 GROUP_CONFIGS가 모든 Heartbeat 채널을 포함한다면 아래 코드는 제거 가능
+    if channel_id in HEARTBEAT_TARGET_CHANNEL_IDS:
+        channel_id_str = str(channel_id)
+        channel_name = HEARTBEAT_TARGET_CHANNEL_IDS[channel_id]
         await process_heartbeat_message(message, channel_id_str, channel_name)
+        return
 
 # Placeholder for UserProfile and HeartbeatManager if they are not in the snippet
 # Ensure these classes exist and have the methods used below (get_profile, save_profiles, get_last_heartbeat)
-class UserProfile:
-    profiles = {}
-    data_file = 'data/user_data.json' # Example path
-
-    @classmethod
-    def load_profiles(cls):
-        # Load profiles from data_file
-        if os.path.exists(cls.data_file):
-            try:
-                with open(cls.data_file, 'r', encoding='utf-8') as f:
-                    cls.profiles = json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                print(f"Error loading user profiles: {e}")
-                cls.profiles = {}
-        else:
-            cls.profiles = {}
-
-    @classmethod
-    def save_profiles(cls):
-        # Save profiles to data_file
-        try:
-            # Ensure data directory exists
-            os.makedirs(os.path.dirname(cls.data_file), exist_ok=True)
-            with open(cls.data_file, 'w', encoding='utf-8') as f:
-                json.dump(cls.profiles, f, indent=4)
-        except IOError as e:
-            print(f"Error saving user profiles: {e}")
-
-
-    @classmethod
-    def get_profile(cls, user_id_str):
-        return cls.profiles.get(user_id_str)
-
-class HeartbeatManager:
-    heartbeats = {} # { user_id_str: last_heartbeat_datetime }
-    # In a real scenario, this might load/save from a file or DB
-    @classmethod
-    def record_heartbeat(cls, user_id_str):
-        cls.heartbeats[user_id_str] = datetime.now(timezone.utc)
-        print(f"Heartbeat recorded for {user_id_str} at {cls.heartbeats[user_id_str]}")
-
-
-    @classmethod
-    def get_last_heartbeat(cls, user_id_str):
-        return cls.heartbeats.get(user_id_str)
-
+# --- 기존 UserProfile, HeartbeatManager 클래스 정의 부분 ---
+# (이 부분은 수정되지 않았으므로 생략)
+# class UserProfile: ...
+# class HeartbeatManager: ...
 
 # --- Friend List Generation Logic ---
 async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
@@ -854,6 +882,275 @@ async def check_heartbeat_status():
         print("--- 사용자 상태 확인 및 목록 업데이트 완료 ---")
         await asyncio.sleep(60)
 
+async def parse_godpack_message(content: str) -> dict:
+    """
+    GP 결과 메시지 텍스트를 파싱하여 게시 정보와 태그 키를 반환합니다.
+    Poke.py의 found_GodPack, found_Pseudo 역할을 가정하여 구현합니다.
+    실제 메시지 형식에 따라 조정이 필요할 수 있습니다.
+
+    Args:
+        content: 메시지 텍스트 내용 (message.content)
+
+    Returns:
+        dict: {'inform': str | None, 'title': str | None, 'tag_key': str | None}
+              inform: 게시될 본문 내용 (None이면 첨부파일만 게시)
+              title: (포럼 스레드용) 제목
+              tag_key: 적용할 태그의 키 (예: "1P", "2P", None)
+    """
+    logging.debug(f"GP 메시지 파싱 시작: {content[:100]}...")
+    inform = None # 기본적으로 본문 없음 (첨부파일만 게시 가정)
+    title = None
+    tag_key = None
+
+    try:
+        # --- 실제 파싱 로직 (제공된 예시 기반) ---
+        username = None
+        progress_percent = None
+        player_count_tag = None
+        timestamp_str = None
+
+        # 1. 사용자 이름 추출 (예: "papawolf316 (숫자)")
+        user_match = re.search(r"^([\w\d_]+)\s+\(\d+\)", content, re.MULTILINE)
+        if user_match:
+            username = user_match.group(1)
+
+        # 2. 진행률 추출 및 계산 (예: "[4/5]")
+        progress_match = re.search(r"\[(\d+)/(\d+)\]", content)
+        if progress_match:
+            try:
+                current, total = int(progress_match.group(1)), int(progress_match.group(2))
+                if total > 0:
+                    progress_percent = f"{int((current / total) * 100)}%"
+            except (ValueError, ZeroDivisionError):
+                logging.warning(f"진행률 계산 오류: {progress_match.group(0)}")
+
+        # 3. 플레이어 수 태그 추출 (예: "[2P]")
+        player_count_match = re.search(r"\[(\dP)\]", content) # 1P, 2P, 3P, 4P, 5P 등
+        if player_count_match:
+            player_count_tag = player_count_match.group(1)
+            tag_key = player_count_tag # 태그 키로 사용
+
+        # 4. 파일명에서 타임스탬프 추출 (예: "20250408161905")
+        filename_match = re.search(r"File name: (\d{14})_", content)
+        if filename_match:
+            ts_digits = filename_match.group(1)
+            try:
+                # datetime 객체로 변환 후 원하는 형식으로 포맷
+                dt_obj = datetime.strptime(ts_digits, '%Y%m%d%H%M%S')
+                timestamp_str = dt_obj.strftime('%Y.%m.%d %H:%M') # 예: 2025.04.08 16:19
+            except ValueError:
+                logging.warning(f"타임스탬프 변환 오류: {ts_digits}")
+
+        # 5. 제목 조합 (모든 정보가 추출되었는지 확인)
+        if username and progress_percent and player_count_tag and timestamp_str:
+            title = f"{username} / {progress_percent} / {player_count_tag} / {timestamp_str}"
+        else:
+            # 필수 정보 누락 시 기본 제목 또는 에러 처리
+            logging.warning(f"GP 메시지 파싱 중 일부 정보 누락. 제목 생성 실패. Content: {content[:100]}...")
+            # 필요시 기본 제목 설정: title = "GP 결과 (파싱 실패)"
+            # 또는 None으로 두어 process_gp_result_message에서 처리하도록 함
+            return {'inform': None, 'title': None, 'tag_key': None} # 실패 처리
+
+        # 본문은 없으므로 inform은 None 유지
+
+        logging.info(f"GP 메시지 파싱 결과: Title='{title}', Tag='{tag_key}'")
+        return {'inform': inform, 'title': title, 'tag_key': tag_key}
+
+    except Exception as e:
+        logging.error(f"GP 메시지 파싱 중 오류 발생: {e}. Content: {content[:100]}...", exc_info=True)
+        return {'inform': None, 'title': None, 'tag_key': None} # 오류 시 None 반환
+
+async def post_gp_result(posting_channel: discord.abc.GuildChannel,
+                         attachments: list[discord.Attachment],
+                         inform: str | None, # inform이 None일 수 있음을 명시
+                         title: str,
+                         tag_key: str | None,
+                         tags_config: dict,
+                         group_name: str):
+    """
+    파싱된 GP 결과와 첨부파일을 지정된 채널에 게시하고 태그를 적용합니다.
+    inform이 None이면 첨부파일만 게시합니다.
+
+    Args:
+        posting_channel: 게시할 채널 객체
+        attachments: 메시지 첨부 파일 리스트
+        inform: 게시될 본문 내용 또는 None
+        title: (포럼 스레드용) 제목
+        tag_key: 적용할 태그 키 ("1P", "2P", 등) 또는 None
+        tags_config: 그룹의 태그 설정 딕셔너리
+        group_name: 로그용 그룹 이름
+    """
+    try:
+        # 첨부 파일 처리 (파일이 있을 때만 변환)
+        files_to_send = []
+        if attachments:
+            files_to_send = [await att.to_file() for att in attachments]
+
+        # inform이 None이고 첨부 파일이 있을 때 -> 파일만 전송
+        if inform is None and files_to_send:
+            logging.info(f"[{group_name}] 본문 없이 첨부파일({len(files_to_send)}개)만 포스팅합니다.")
+            if isinstance(posting_channel, discord.ForumChannel):
+                applied_tags_list = []
+                # 1. "Yet" 태그 무조건 추가 시도
+                yet_tag_key = "Yet"
+                yet_tag_id = tags_config.get(yet_tag_key)
+                if yet_tag_id:
+                    yet_tag = discord.utils.get(posting_channel.available_tags, id=yet_tag_id)
+                    if yet_tag:
+                        applied_tags_list.append(yet_tag)
+                        logging.info(f"[{group_name}] 기본 태그 'Yet' 적용됨.")
+                    else:
+                        logging.warning(f"[{group_name}] 설정된 'Yet' 태그(ID:{yet_tag_id})를 포럼 채널({posting_channel.name})에서 찾을 수 없습니다.")
+                else:
+                    logging.warning(f"[{group_name}] 'Yet' 태그가 tags_config에 정의되지 않았습니다.")
+
+                # 2. tag_key 기반 태그 추가 시도 (예: "1P", "2P")
+                if tag_key and tag_key in tags_config:
+                    tag_id = tags_config[tag_key]
+                    target_tag_object = discord.utils.get(posting_channel.available_tags, id=tag_id)
+                    if target_tag_object:
+                        # 이미 Yet 태그가 있을 수 있으므로 중복 확인 불필요 (같은 태그 객체는 한 번만 추가됨)
+                        if target_tag_object not in applied_tags_list: # 혹시 Yet과 같은 태그일 경우 대비
+                            applied_tags_list.append(target_tag_object)
+                            logging.info(f"[{group_name}] 추가 태그 '{target_tag_object.name}' (ID: {tag_id}) 적용됨.")
+                        else:
+                            logging.info(f"[{group_name}] 태그 '{target_tag_object.name}'는 이미 Yet 태그로 적용되었습니다.") # Yet과 tag_key 태그가 동일한 경우
+                    else:
+                        logging.warning(f"[{group_name}] 설정된 태그 키 '{tag_key}'(ID:{tag_id}) ... 태그 찾기 실패") # 로그 간략화
+                elif tag_key:
+                    logging.warning(f"[{group_name}] 태그 키 '{tag_key}'가 tags_config에 정의되지 않았습니다.")
+
+                # 스레드 생성 (content 없이)
+                await posting_channel.create_thread(
+                    name=title,
+                    files=files_to_send,
+                    applied_tags=applied_tags_list
+                )
+                logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 첨부파일만 포함된 스레드 생성 완료.")
+
+            elif isinstance(posting_channel, discord.TextChannel):
+                # 텍스트 채널: content 없이 파일만 전송
+                await posting_channel.send(files=files_to_send)
+                logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 첨부파일만 전송 완료.")
+            else:
+                logging.warning(f"[{group_name}] 포스팅 채널 타입({type(posting_channel)}) 미지원 (첨부파일만 전송).")
+
+        # inform 내용이 있을 때 -> 기존 로직대로 텍스트 + 파일 전송
+        elif inform is not None:
+            logging.info(f"[{group_name}] 본문과 첨부파일({len(files_to_send)}개) 포스팅합니다.")
+            if isinstance(posting_channel, discord.ForumChannel):
+                applied_tags_list = []
+                # 태그 찾기 및 적용 로직 (위와 동일)
+                if tag_key and tag_key in tags_config:
+                    tag_id = tags_config[tag_key]
+                    target_tag_object = discord.utils.get(posting_channel.available_tags, id=tag_id)
+                    if target_tag_object: applied_tags_list.append(target_tag_object); logging.info(f"... 태그 '{target_tag_object.name}' 적용")
+                    else: logging.warning(f"... 태그 ID({tag_id}) 찾기 실패")
+                elif tag_key: logging.warning(f"... 태그 키 '{tag_key}' 정의 안됨")
+                if not applied_tags_list:
+                    yet_tag_id = tags_config.get("Yet")
+                    if yet_tag_id:
+                         yet_tag = discord.utils.get(posting_channel.available_tags, id=yet_tag_id)
+                         if yet_tag: applied_tags_list.append(yet_tag); logging.info("... 기본 태그 'Yet' 적용")
+
+                # 스레드 생성 (content 포함)
+                await posting_channel.create_thread(
+                    name=title,
+                    content=inform,
+                    files=files_to_send,
+                    applied_tags=applied_tags_list
+                )
+                logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 결과 스레드 생성 완료.")
+
+            elif isinstance(posting_channel, discord.TextChannel):
+                # 텍스트 채널: content 와 파일 전송
+                await posting_channel.send(content=inform, files=files_to_send)
+                logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 결과 메시지 전송 완료.")
+            else:
+                logging.warning(f"[{group_name}] 포스팅 채널 타입({type(posting_channel)}) 미지원.")
+
+        # inform도 None이고 첨부 파일도 없을 때
+        else:
+            logging.warning(f"[{group_name}] 포스팅할 내용(본문 또는 첨부파일)이 없습니다.")
+
+    except discord.Forbidden:
+        logging.error(f"[{group_name}] 포스팅 채널 '{posting_channel.name}'에 메시지/파일 작성 또는 태그 적용 권한이 없습니다.")
+    except discord.HTTPException as e:
+        logging.error(f"[{group_name}] 포스팅 중 HTTP 오류 발생: {e.status} {e.text}")
+    except Exception as e:
+        logging.error(f"[{group_name}] 포스팅 중 예상치 못한 오류 발생: {e}", exc_info=True)
+
+async def process_gp_result_message(message: discord.Message, group_config: dict):
+    """GP 결과 메시지 처리 (텍스트 파싱, 포스팅, 태그 적용)"""
+    group_name = group_config.get("NAME", "Unknown Group")
+    content = message.content
+    attachments = message.attachments
+    logging.info(f"[{group_name}-Detect] GP 결과 메시지(텍스트) 감지 (ID: {message.id}), 첨부: {len(attachments)}개")
+    logging.info(f"  Raw Content: {content[:200]}...")
+
+    inform = None
+    title = None
+    tag_key = None
+
+    # --- Poke.py 로직 적용: 키워드 확인 및 분기 ---
+    if "Invalid" in content:
+        logging.info(f"[{group_name}] 'Invalid' 키워드 감지. 처리를 건너뜁니다.")
+        return # Poke.py 처럼 Invalid는 무시
+
+    elif "found by" in content: # Pseudo God Pack 처리
+        logging.info(f"[{group_name}] 'found by' 키워드 감지 (Pseudo God Pack).")
+        # 메시지 파싱 (parse_godpack_message는 내부적으로 Pseudo/Normal 구분 필요)
+        parsed_data = await parse_godpack_message(content)
+        inform = parsed_data['inform']
+        title = parsed_data['title']
+        tag_key = parsed_data['tag_key'] # 파싱 함수가 결정한 태그 키
+
+    elif "Valid" in content: # Valid God Pack 처리
+        logging.info(f"[{group_name}] 'Valid' 키워드 감지 (Valid God Pack).")
+        # 메시지 파싱
+        parsed_data = await parse_godpack_message(content)
+        inform = parsed_data['inform']
+        title = parsed_data['title']
+        tag_key = parsed_data['tag_key']
+
+    else:
+        logging.warning(f"[{group_name}] 메시지에서 유효한 GP 결과 키워드('Invalid', 'found by', 'Valid')를 찾지 못했습니다.")
+        return # 처리할 키워드가 없으면 종료
+
+    # --- 파싱 결과 확인 및 포스팅 채널 가져오기 ---
+    if title is None: # 수정된 조건: title만 None이 아니면 진행 (inform이 None은 첨부만 올리라는 의미)
+        logging.error(f"[{group_name}] 메시지 파싱 실패. 포스팅할 제목 정보가 없습니다.")
+        return
+
+    posting_channel_id = group_config.get("POSTING_ID")
+    tags_config = group_config.get("TAGS", {})
+
+    if not posting_channel_id:
+        logging.warning(f"[{group_name}] 포스팅 채널 ID가 설정되지 않아 포스팅을 건너뜁니다.")
+        return
+
+    try:
+        posting_channel = await bot.fetch_channel(posting_channel_id)
+    except discord.NotFound:
+        logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id})을 찾을 수 없습니다.")
+        return
+    except discord.Forbidden:
+        logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id})에 접근할 권한이 없습니다.")
+        return
+    except Exception as e:
+        logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id})을 가져오는 중 오류 발생: {e}", exc_info=True)
+        return
+
+    # --- 결과 게시 함수 호출 ---
+    await post_gp_result(
+        posting_channel=posting_channel,
+        attachments=attachments,
+        inform=inform,
+        title=title,
+        tag_key=tag_key,
+        tags_config=tags_config,
+        group_name=group_name
+    )
 
 async def main():
     """메인 실행 함수"""
