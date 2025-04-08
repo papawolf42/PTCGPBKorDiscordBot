@@ -5,6 +5,10 @@ import json
 import os
 import re
 import shutil
+import logging # 로깅 모듈 추가
+
+# --- 로깅 설정 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 # --- 상수 정의 ---
 GROUP1_CHANNEL_ID = os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')
@@ -47,7 +51,6 @@ class User:
         self.version = heartbeat_data.get('version', self.version)
         self.type = heartbeat_data.get('type', self.type)
         self.pack_select = heartbeat_data.get('select', self.pack_select)
-        # last_seen_timestamp와 last_channel_id_str는 User 객체에서 더 이상 관리하지 않음
 
     def update_identity(self, code: str | None, discord_id: str | None):
         """코드 및 디스코드 ID 업데이트"""
@@ -88,145 +91,121 @@ def sanitize_filename(name):
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
     return name[:100] # 100자 제한
 
-# --- 데이터 처리 함수 (Heartbeat) ---
-def ensure_heartbeat_data_dir():
-    """Heartbeat 데이터 저장 디렉토리 확인 및 생성"""
-    if not os.path.exists(HEARTBEAT_DATA_DIR):
+def ensure_data_dir(dir_path, dir_type_name):
+    """데이터 저장 디렉토리 확인 및 생성"""
+    if not os.path.exists(dir_path):
         try:
-            os.makedirs(HEARTBEAT_DATA_DIR)
-            print(f"📁 Heartbeat 데이터 디렉토리 생성: {HEARTBEAT_DATA_DIR}")
+            os.makedirs(dir_path)
+            logging.info(f"📁 {dir_type_name} 데이터 디렉토리 생성: {dir_path}")
         except OSError as e:
-            print(f"❌ Heartbeat 데이터 디렉토리 생성 실패: {e}")
+            logging.error(f"❌ {dir_type_name} 데이터 디렉토리 생성 실패: {e}", exc_info=True)
             raise
 
-def get_heartbeat_filepath(user_name):
-    """사용자 Heartbeat JSON 파일 경로 반환"""
-    return os.path.join(HEARTBEAT_DATA_DIR, f"{sanitize_filename(user_name)}.json")
+def get_data_filepath(user_name, base_dir):
+    """사용자 데이터 JSON 파일 경로 반환"""
+    return os.path.join(base_dir, f"{sanitize_filename(user_name)}.json")
 
-def read_heartbeat_data(user_name):
-    """사용자 Heartbeat JSON 파일 읽기 (없거나 오류 시 빈 리스트 반환)"""
-    filepath = get_heartbeat_filepath(user_name)
+def read_json_file(filepath, data_type_name, user_name, default_value):
+    """JSON 파일 읽기 (오류 시 기본값 반환)"""
     if not os.path.exists(filepath):
-        return []
+        return default_value
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            # 간단한 유효성 검사 및 정렬
-            valid_data = [r for r in data if isinstance(r, dict) and 'timestamp' in r]
-            valid_data.sort(key=lambda x: x.get('timestamp', ''))
-            return valid_data
-        else:
-            print(f"⚠️ 사용자 '{user_name}' Heartbeat 파일 형식이 리스트가 아님: {filepath}. 빈 리스트 반환.")
-            return []
-    except (json.JSONDecodeError, Exception) as e:
-        print(f"❌ 사용자 '{user_name}' Heartbeat 파일 읽기/디코딩 오류: {e}. 빈 리스트 반환.")
-        return []
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        logging.warning(f"⚠️ 사용자 '{user_name}' {data_type_name} 파일 JSON 디코딩 오류: {filepath}. 기본값 반환. Error: {e}")
+        return default_value
+    except OSError as e:
+        logging.error(f"❌ 사용자 '{user_name}' {data_type_name} 파일 읽기 오류: {filepath}. Error: {e}", exc_info=True)
+        return default_value
+
+def write_json_file(filepath, data, data_type_name, user_name):
+    """JSON 파일 쓰기"""
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        return True
+    except OSError as e:
+        logging.error(f"❌ 사용자 '{user_name}' {data_type_name} 파일 쓰기 오류: {filepath}. Error: {e}", exc_info=True)
+        return False
+
+# --- 데이터 처리 함수 (Heartbeat) ---
+def read_heartbeat_data(user_name):
+    """사용자 Heartbeat JSON 파일 읽기 (없거나 오류 시 빈 리스트 반환)"""
+    filepath = get_data_filepath(user_name, HEARTBEAT_DATA_DIR)
+    data = read_json_file(filepath, "Heartbeat", user_name, [])
+    if isinstance(data, list):
+        valid_data = [r for r in data if isinstance(r, dict) and 'timestamp' in r]
+        valid_data.sort(key=lambda x: x.get('timestamp', ''))
+        return valid_data
+    elif data: # 파일은 읽었으나 형식이 리스트가 아닐 때
+        logging.warning(f"⚠️ 사용자 '{user_name}' Heartbeat 파일 형식이 리스트가 아님: {filepath}. 빈 리스트 반환.")
+    return []
 
 def write_heartbeat_data(user_name, data_list):
     """사용자 Heartbeat 기록 리스트를 JSON 파일에 쓰기 (정렬 포함)"""
-    filepath = get_heartbeat_filepath(user_name)
+    filepath = get_data_filepath(user_name, HEARTBEAT_DATA_DIR)
     try:
         data_list.sort(key=lambda x: x.get('timestamp', '')) # 쓰기 전 정렬 보장
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data_list, f, indent=4, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"❌ 사용자 '{user_name}' Heartbeat 파일 쓰기 오류: {e}")
+        return write_json_file(filepath, data_list, "Heartbeat", user_name)
+    except Exception as e: # 정렬 중 오류 발생 가능성 (매우 낮음)
+        logging.error(f"❌ 사용자 '{user_name}' Heartbeat 데이터 정렬 중 오류: {e}", exc_info=True)
         return False
 
-def load_all_latest_heartbeat_data():
-    """모든 사용자 Heartbeat 파일의 최신 기록을 메모리에 로드"""
-    global heartbeat_records
-    ensure_heartbeat_data_dir()
-    print(f"💾 Heartbeat 데이터 폴더 스캔 및 최신 기록 로드 시작: {HEARTBEAT_DATA_DIR}")
-    loaded_records = {}
-    try:
-        for filename in os.listdir(HEARTBEAT_DATA_DIR):
-            if filename.endswith(".json"):
-                user_name_from_file = filename[:-5] # .json 제거
-                user_data = read_heartbeat_data(user_name_from_file) # 정렬된 리스트 반환
-                if user_data:
-                    latest_record = user_data[-1] # 마지막 항목이 최신
-                    # channel_id_str 은 더 이상 사용/저장하지 않음
-                    loaded_records[user_name_from_file] = {"latest_record": latest_record}
-    except Exception as e:
-        print(f"❌ 최신 Heartbeat 기록 로드 중 오류 발생: {e}")
-
-    heartbeat_records = loaded_records
-    print(f"✅ 최신 Heartbeat 기록 로드 완료: {len(heartbeat_records)}명")
-
 # --- 데이터 처리 함수 (User Profile) ---
-def ensure_user_data_dir():
-    """사용자 프로필 데이터 저장 디렉토리 확인 및 생성"""
-    if not os.path.exists(USER_DATA_DIR):
-        try:
-            os.makedirs(USER_DATA_DIR)
-            print(f"📁 사용자 프로필 데이터 디렉토리 생성: {USER_DATA_DIR}")
-        except OSError as e:
-            print(f"❌ 사용자 프로필 데이터 디렉토리 생성 실패: {e}")
-            raise
-
-def get_user_profile_filepath(user_name):
-    """사용자 프로필 JSON 파일 경로 반환"""
-    return os.path.join(USER_DATA_DIR, f"{sanitize_filename(user_name)}.json")
-
 def read_user_profile(user_name):
     """사용자 프로필 JSON 파일 읽기 (User 객체 반환, 없거나 오류 시 None)"""
-    filepath = get_user_profile_filepath(user_name)
-    if not os.path.exists(filepath):
-        return None
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+    filepath = get_data_filepath(user_name, USER_DATA_DIR)
+    data = read_json_file(filepath, "프로필", user_name, None)
+    if data:
         user = User.from_dict(data)
         if user:
             return user
         else:
-            print(f"⚠️ 사용자 '{user_name}' 프로필 파일 데이터 유효하지 않음: {filepath}. None 반환.")
-            return None
-    except (json.JSONDecodeError, Exception) as e:
-        print(f"❌ 사용자 '{user_name}' 프로필 파일 읽기/디코딩 오류: {e}. None 반환.")
-        return None
+            logging.warning(f"⚠️ 사용자 '{user_name}' 프로필 파일 데이터 유효하지 않음: {filepath}. None 반환.")
+    return None
 
 def write_user_profile(user):
     """User 객체를 JSON 파일에 쓰기"""
     if not isinstance(user, User) or not user.name:
-        print("❌ 잘못된 User 객체 전달됨. 쓰기 작업 건너뜀.")
+        logging.warning("❌ 잘못된 User 객체 전달됨. 쓰기 작업 건너뜀.")
         return False
-    filepath = get_user_profile_filepath(user.name)
-    try:
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(user.to_dict(), f, indent=4, ensure_ascii=False)
-        # print(f"💾 사용자 프로필 저장됨: {user.name}") # 로그 너무 많을 수 있어 주석 처리
-        return True
-    except Exception as e:
-        print(f"❌ 사용자 '{user.name}' 프로필 파일 쓰기 오류: {e}")
-        return False
+    filepath = get_data_filepath(user.name, USER_DATA_DIR)
+    return write_json_file(filepath, user.to_dict(), "프로필", user.name)
 
-def load_all_user_profiles():
-    """모든 사용자 프로필 파일을 메모리에 로드"""
-    global user_profiles
-    ensure_user_data_dir()
-    print(f"💾 사용자 프로필 로드 시작: {USER_DATA_DIR}")
-    loaded_profiles = {}
+# --- 데이터 로딩 함수 (공통) ---
+def load_all_data(data_dir, data_type_name, read_func, target_dict):
+    """지정된 디렉토리에서 모든 데이터 파일을 로드하여 target_dict 업데이트"""
+    ensure_data_dir(data_dir, data_type_name)
+    logging.info(f"💾 {data_type_name} 데이터 폴더 스캔 및 로드 시작: {data_dir}")
+    loaded_count = 0
     try:
-        for filename in os.listdir(USER_DATA_DIR):
+        for filename in os.listdir(data_dir):
             if filename.endswith(".json"):
-                user_name_from_file = filename[:-5] # .json 제거
-                user = read_user_profile(user_name_from_file)
-                if user:
-                    loaded_profiles[user.name] = user # 파일 이름 대신 객체 내부 이름 사용
-    except Exception as e:
-        print(f"❌ 사용자 프로필 로드 중 오류 발생: {e}")
+                user_name_from_file = filename[:-5]
+                data = read_func(user_name_from_file) # 각 타입에 맞는 읽기 함수 사용
+                if data:
+                    if data_type_name == "Heartbeat":
+                        if isinstance(data, list) and data: # read_heartbeat_data는 리스트 반환
+                            target_dict[user_name_from_file] = {"latest_record": data[-1]}
+                            loaded_count += 1
+                    elif data_type_name == "사용자 프로필":
+                        # read_user_profile은 User 객체 또는 None 반환
+                        target_dict[data.name] = data # 파일 이름 대신 객체 이름 사용
+                        loaded_count += 1
 
-    user_profiles = loaded_profiles
-    print(f"✅ 사용자 프로필 로드 완료: {len(user_profiles)}명")
+    except OSError as e:
+        logging.error(f"❌ {data_type_name} 데이터 로드 중 디렉토리 오류 발생: {data_dir}. Error: {e}", exc_info=True)
+    except Exception as e: # 예상치 못한 오류 (read_func 내부 오류 등)
+        logging.error(f"❌ {data_type_name} 데이터 로드 중 예상치 못한 오류 발생: {e}", exc_info=True)
+
+    logging.info(f"✅ {data_type_name} 데이터 로드 완료: {loaded_count}명")
+    # return target_dict # 전역 변수를 직접 수정하므로 반환값 사용 안 함
 
 # --- 사용자 정보 소스 처리 ---
 async def update_user_profiles_from_source():
     """외부 소스(Pastebin)에서 사용자 정보를 가져와 프로필 업데이트"""
-    print(f"🌐 사용자 정보 소스 업데이트 시작: {USER_INFO_SOURCE_URL}")
+    logging.info(f"🌐 사용자 정보 소스 업데이트 시작: {USER_INFO_SOURCE_URL}")
     updated_count = 0
     try:
         # !!! 중요: 아래 코드는 aiohttp 라이브러리가 필요합니다.
@@ -237,11 +216,8 @@ async def update_user_profiles_from_source():
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.get(USER_INFO_SOURCE_URL) as response:
-                if response.status == 200:
-                    text_content = await response.text()
-                else:
-                    print(f"❌ 사용자 정보 소스({USER_INFO_SOURCE_URL}) 접근 실패: 상태 코드 {response.status}")
-                    return
+                response.raise_for_status() # 오류 발생 시 예외 발생
+                text_content = await response.text()
 
         lines = text_content.splitlines()
         i = 0
@@ -264,12 +240,11 @@ async def update_user_profiles_from_source():
                             if user_profile.discord_id != discord_id or user_profile.code != code:
                                 user_profile.update_identity(code=code, discord_id=discord_id)
                                 if write_user_profile(user_profile):
-                                    # print(f"  🔄 사용자 정보 업데이트됨: {name} (ID: {discord_id}, Code: {code})")
+                                    # logging.debug(f"  🔄 사용자 정보 업데이트됨: {name} (ID: {discord_id}, Code: {code})")
                                     updated_count += 1
-                                else:
-                                    print(f"  ❌ 사용자 정보 저장 실패: {name}")
+                                # else: 실패 시 write_user_profile에서 에러 로그 기록
                         # else:
-                            # print(f"  ❓ 소스에 있으나 프로필 없는 사용자: {name} (Heartbeat 기록이 먼저 필요할 수 있음)")
+                            # logging.debug(f"  ❓ 소스에 있으나 프로필 없는 사용자: {name} (Heartbeat 기록이 먼저 필요할 수 있음)")
                             # 필요 시 여기서 새 User 생성 가능
 
                     # 다음 블록으로 이동 (보통 4-5줄 단위)
@@ -279,17 +254,15 @@ async def update_user_profiles_from_source():
                     continue # 다음 <@ 찾기
             i += 1 # <@ 시작 아니면 다음 줄로
 
-        print(f"✅ 사용자 정보 소스 업데이트 완료: {updated_count}명 정보 업데이트됨.")
+        logging.info(f"✅ 사용자 정보 소스 업데이트 완료: {updated_count}명 정보 업데이트됨.")
 
     except ImportError:
-        print("❌ 'aiohttp' 라이브러리가 설치되지 않았습니다. Pastebin 데이터 로딩을 건너뜁니다.")
-        print("   실행 환경에 `pip install aiohttp` 를 실행해주세요.")
+        logging.error("❌ 'aiohttp' 라이브러리가 설치되지 않았습니다. Pastebin 데이터 로딩을 건너뜁니다.")
+        logging.error("   실행 환경에 `pip install aiohttp` 를 실행해주세요.")
     except aiohttp.ClientError as e:
-        print(f"❌ 사용자 정보 소스({USER_INFO_SOURCE_URL}) 접근 중 네트워크 오류: {e}")
+        logging.error(f"❌ 사용자 정보 소스({USER_INFO_SOURCE_URL}) 접근 중 네트워크 오류: {e}")
     except Exception as e:
-        # import traceback
-        # traceback.print_exc() # 상세 오류 확인용
-        print(f"❌ 사용자 정보 소스 처리 중 예상치 못한 오류 발생: {e}")
+        logging.error(f"❌ 사용자 정보 소스 처리 중 예상치 못한 오류 발생: {e}", exc_info=True)
 
 # --- Heartbeat 메시지 파싱 ---
 def parse_heartbeat_message(content):
@@ -319,7 +292,7 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
     try:
         user_name = message.content.split("\n")[0].strip()
         if not user_name:
-            # print(f"⚠️ [{channel_name}] 사용자 이름 없는 메시지 건너뜀: {message.content[:50]}...")
+            # logging.debug(f"⚠️ [{channel_name}] 사용자 이름 없는 메시지 건너뜀: {message.content[:50]}...")
             return False
 
         timestamp_dt = message.created_at.replace(tzinfo=timezone.utc)
@@ -327,7 +300,6 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
 
         # --- 1. Heartbeat 기록 처리 ---
         parsed_heartbeat_data = parse_heartbeat_message(message.content)
-        # Heartbeat 기록에는 타임스탬프와 파싱된 데이터만 저장 (채널 ID 제외)
         heartbeat_record_specific = {
             "timestamp": timestamp_iso,
             **parsed_heartbeat_data
@@ -336,16 +308,16 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
         heartbeat_data_list = read_heartbeat_data(user_name)
 
         if any(record.get('timestamp') == timestamp_iso for record in heartbeat_data_list):
-            return False
+            return False # 중복 처리 방지
 
         heartbeat_data_list.append(heartbeat_record_specific)
         heartbeat_saved = False
         if write_heartbeat_data(user_name, heartbeat_data_list):
-            # print(f"💾 Heartbeat 기록됨 [{channel_name}]: {user_name} ...") # 로그 간소화
-            # 메모리(heartbeat_records) 업데이트 (채널 ID 없이)
+            # logging.debug(f"💾 Heartbeat 기록됨 [{channel_name}]: {user_name} ...") # 너무 빈번할 수 있어 주석 처리 또는 DEBUG 레벨
+            # 메모리(heartbeat_records) 업데이트
             heartbeat_records[user_name] = {"latest_record": heartbeat_record_specific}
             heartbeat_saved = True
-        # else: # 실패 로그는 write_heartbeat_data 에서 출력
+        # else: 실패 로그는 write_heartbeat_data 에서 출력
 
         # --- 2. User 프로필 업데이트 ---
         user_profile = user_profiles.get(user_name)
@@ -353,38 +325,36 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
             user_profile = read_user_profile(user_name)
             if not user_profile:
                 user_profile = User(user_name)
-                print(f"✨ 신규 사용자 프로필 생성: {user_name}")
+                logging.info(f"✨ 신규 사용자 프로필 생성: {user_name}")
 
-        # Heartbeat 데이터로 User 객체 업데이트 (이제 timestamp, channel_id는 없음)
-        user_profile.update_from_heartbeat(parsed_heartbeat_data) # 파싱된 데이터만 전달
+        # Heartbeat 데이터로 User 객체 업데이트
+        user_profile.update_from_heartbeat(parsed_heartbeat_data)
 
         # 업데이트된 User 객체를 메모리 및 파일에 저장
         user_profiles[user_name] = user_profile
         write_user_profile(user_profile) # 저장 실패 시 함수 내에서 로그 출력
 
-        return heartbeat_saved
+        return heartbeat_saved # Heartbeat 저장 성공 여부 반환
 
     except Exception as e:
-        # import traceback
-        # traceback.print_exc()
-        print(f"❌ [{channel_name}] Heartbeat 처리 중 예외 발생: {e} | 사용자: {user_name} | 메시지: {message.content[:100]}...")
+        logging.error(f"❌ [{channel_name}] Heartbeat 처리 중 예외 발생: {e} | 사용자: {user_name} | 메시지: {message.content[:100]}...", exc_info=True)
         return False
 
 # --- 이벤트 핸들러 및 주기적 작업 ---
 @bot.event
 async def on_ready():
     """봇 준비 완료 시 실행"""
-    print(f'✅ 로그인됨: {bot.user}')
-    print("--- 초기화 시작 ---")
-    # 데이터 디렉토리 확인 및 생성
-    ensure_heartbeat_data_dir()
-    ensure_user_data_dir()
+    logging.info(f'✅ 로그인됨: {bot.user}')
+    logging.info("--- 초기화 시작 ---")
 
-    # 데이터 로딩
-    print("💾 최신 Heartbeat 기록 로딩 시작...")
-    load_all_latest_heartbeat_data()
-    print("💾 사용자 프로필 로딩 시작...")
-    load_all_user_profiles()
+    # 데이터 디렉토리 확인/생성 (load_all_data 내부에서 호출됨)
+    # ensure_data_dir(HEARTBEAT_DATA_DIR, "Heartbeat")
+    # ensure_data_dir(USER_DATA_DIR, "사용자 프로필")
+
+    # 데이터 로딩 (전역 변수 직접 업데이트)
+    global heartbeat_records, user_profiles
+    load_all_data(HEARTBEAT_DATA_DIR, "Heartbeat", read_heartbeat_data, heartbeat_records)
+    load_all_data(USER_DATA_DIR, "사용자 프로필", read_user_profile, user_profiles)
 
     # 사용자 정보 소스(Pastebin)에서 ID 및 Code 업데이트 시도
     await update_user_profiles_from_source()
@@ -393,25 +363,24 @@ async def on_ready():
     overall_latest_timestamp = None
     if heartbeat_records:
         timestamps = []
-        for data in heartbeat_records.values():
-             record = data.get("latest_record")
-             if record and 'timestamp' in record:
-                 try:
-                     # ISO 문자열 파싱 (UTC 가정)
-                     ts_str = record['timestamp']
-                     ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                     if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
-                     timestamps.append(ts)
-                 except ValueError:
-                     # print(f"⚠️ 잘못된 타임스탬프 형식 발견 (로드 중): {record.get('timestamp')}")
-                     pass # 오류 무시하고 계속 진행
+        for user_name, data in heartbeat_records.items():
+            record = data.get("latest_record")
+            if record and 'timestamp' in record:
+                try:
+                    ts_str = record['timestamp']
+                    ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+                    timestamps.append(ts)
+                except ValueError:
+                    logging.warning(f"⚠️ 사용자 '{user_name}'의 잘못된 타임스탬프 형식 발견 (로드 중): {record.get('timestamp')}")
+                    pass # 오류 무시하고 계속 진행
         if timestamps:
             overall_latest_timestamp = max(timestamps)
 
     if overall_latest_timestamp:
-        print(f"🔄 마지막 Heartbeat 기록 ({overall_latest_timestamp.isoformat()}) 이후 메시지 스캔")
+        logging.info(f"🔄 마지막 Heartbeat 기록 ({overall_latest_timestamp.isoformat()}) 이후 메시지 스캔")
     else:
-        print("🔄 저장된 Heartbeat 기록 없음. 전체 채널 히스토리 스캔...")
+        logging.info("🔄 저장된 Heartbeat 기록 없음. 전체 채널 히스토리 스캔...")
 
     history_processed_count = 0
     total_scanned = 0
@@ -420,7 +389,7 @@ async def on_ready():
     for channel_id, channel_name in TARGET_CHANNEL_IDS.items():
         channel_id_str = str(channel_id)
         scan_type = '누락분만' if overall_latest_timestamp else '전체'
-        print(f"  [{channel_name}] 채널 기록 조회 중... ({scan_type})")
+        logging.info(f"  [{channel_name}] 채널 기록 조회 중... ({scan_type})")
         channel_processed_count = 0
         channel_scanned = 0
         try:
@@ -431,20 +400,24 @@ async def on_ready():
                 if await process_heartbeat_message(message, channel_id_str, channel_name):
                     channel_processed_count += 1
                     history_processed_count += 1
-                if channel_scanned % 1000 == 0: # 로그 빈도 줄임
-                     print(f"    [{channel_name}] {channel_scanned}개 메시지 스캔됨...")
+                if channel_scanned % 2000 == 0: # 로그 빈도 더 줄임
+                    logging.info(f"    [{channel_name}] {channel_scanned}개 메시지 스캔됨...")
 
-            print(f"    [{channel_name}] 스캔 완료 ({channel_scanned}개 스캔, {channel_processed_count}개 신규 처리).")
-        except (discord.NotFound, discord.Forbidden) as e:
-            print(f"❌ [{channel_name}] 채널 접근 불가: {e}. 건너뜁니다.")
+            logging.info(f"    [{channel_name}] 스캔 완료 ({channel_scanned}개 스캔, {channel_processed_count}개 신규 처리).")
+        except discord.NotFound:
+            logging.error(f"❌ [{channel_name}] 채널({channel_id})을 찾을 수 없습니다. 건너뜁니다.")
+        except discord.Forbidden:
+            logging.error(f"❌ [{channel_name}] 채널({channel_id}) 접근 권한이 없습니다. 건너뜁니다.")
+        except discord.HTTPException as e:
+             logging.error(f"❌ [{channel_name}] 채널 기록 조회 중 Discord API 오류: {e}", exc_info=True)
         except Exception as e:
-            print(f"❌ [{channel_name}] 채널 기록 조회 중 오류: {e}")
+            logging.error(f"❌ [{channel_name}] 채널 기록 조회 중 예상치 못한 오류: {e}", exc_info=True)
 
     scan_end_time = datetime.now()
     scan_duration = scan_end_time - scan_start_time
-    print(f"✅ 전체 채널 히스토리 스캔 완료 ({total_scanned}개 스캔, {history_processed_count}개 신규 Heartbeat 처리됨). 소요 시간: {scan_duration}")
-    print(f'👂 감시 채널: {list(TARGET_CHANNEL_IDS.values())}')
-    print("--- 초기화 완료 ---")
+    logging.info(f"✅ 전체 채널 히스토리 스캔 완료 ({total_scanned}개 스캔, {history_processed_count}개 신규 Heartbeat 처리됨). 소요 시간: {scan_duration}")
+    logging.info(f'👂 감시 채널: {list(TARGET_CHANNEL_IDS.values())}')
+    logging.info("--- 초기화 완료 ---")
 
 @bot.event
 async def on_message(message):
@@ -464,6 +437,7 @@ async def check_heartbeat_status():
         now_utc = datetime.now(timezone.utc)
         offline_threshold = timedelta(minutes=10)
 
+        # 로깅보다는 print가 적합한 상태 표시
         print("\n--- 사용자 상태 확인 ---")
         online_users_status = []
         offline_users_status = []
@@ -472,7 +446,6 @@ async def check_heartbeat_status():
 
         if not all_user_names:
              print("  표시할 사용자 데이터가 없습니다.")
-             # await asyncio.sleep(60) # 루프 시작에서 이미 sleep 함
              continue
 
         for user_name in sorted(list(all_user_names)): # 이름 순 정렬
@@ -486,7 +459,7 @@ async def check_heartbeat_status():
             version = user_profile.version if user_profile else "버전?"
             type_ = user_profile.type if user_profile else "타입?"
             pack_select = user_profile.pack_select if user_profile else "팩?"
-            barracks = user_profile.barracks if user_profile else 0
+            barracks = user_profile.barracks if user_profile else 0 # 프로필 또는 heartbeat에서 가져올 수 있도록 개선 여지 있음
 
             status_prefix = f"{name} ({discord_id_str}, {code})"
             status_suffix = f"(v:{version}|t:{type_}|p:{pack_select}|b:{barracks})"
@@ -505,8 +478,14 @@ async def check_heartbeat_status():
 
                         if now_utc - last_seen <= offline_threshold:
                             is_online = True
+                            # 최신 heartbeat 정보로 barracks 업데이트 (프로필보다 최신일 수 있음)
+                            barracks = latest_record.get('barracks', barracks)
+                            # 필요하다면 version, type, pack_select도 여기서 업데이트 가능
+                            status_suffix = f"(v:{latest_record.get('version', version)}|t:{latest_record.get('type', type_)}|p:{latest_record.get('select', pack_select)}|b:{barracks})"
+
                     except ValueError:
                         last_seen_str = "시간오류"
+                        logging.warning(f"사용자 '{user_name}'의 마지막 접속 시간 처리 오류: {last_seen_iso}")
                 else:
                     last_seen_str = "시간없음"
             # else: Heartbeat 기록 자체가 없는 경우 (프로필만 있거나) -> Offline
@@ -517,7 +496,7 @@ async def check_heartbeat_status():
             else:
                 offline_users_status.append(f"{full_status_str} [마지막: {last_seen_str}]")
 
-        # 결과 출력
+        # 결과 출력 (여전히 print 사용)
         print(f"--- 확인 시간: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} ---")
         print(f"--- Online ({len(online_users_status)}명) ---")
         if online_users_status:
@@ -534,10 +513,15 @@ async def check_heartbeat_status():
 
 async def main():
     """메인 실행 함수"""
-    async with bot:
-        bot.loop.create_task(check_heartbeat_status()) # 주기적 상태 확인 태스크 시작
-        await bot.start(DISCORD_TOKEN)
+    try:
+        async with bot:
+            bot.loop.create_task(check_heartbeat_status()) # 주기적 상태 확인 태스크 시작
+            await bot.start(DISCORD_TOKEN)
+    except Exception as e:
+        logging.critical(f"봇 실행 중 치명적인 오류 발생: {e}", exc_info=True)
+    finally:
+        logging.info("봇 종료.")
 
 if __name__ == "__main__":
-    # import traceback
+    # import traceback # 필요 시 주석 해제
     asyncio.run(main())
