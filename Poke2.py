@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import logging # 로깅 모듈 추가
+import random # Added import
 
 # --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
@@ -33,6 +34,14 @@ bot = discord.Client(intents=intents)
 heartbeat_records = {}
 # 사용자 프로필 정보 (메모리): {user_name: User}
 user_profiles = {}
+
+# 테스트 플래그
+test_flag = True # True로 설정 시 모든 등록 유저를 온라인으로 간주
+
+# asyncio 이벤트 추가
+initial_scan_complete_event = asyncio.Event()
+# 파일 쓰기 동기화를 위한 락
+friend_list_lock = asyncio.Lock()
 
 # --- User 클래스 정의 ---
 class User:
@@ -347,16 +356,10 @@ async def on_ready():
     logging.info(f'✅ 로그인됨: {bot.user}')
     logging.info("--- 초기화 시작 ---")
 
-    # 데이터 디렉토리 확인/생성 (load_all_data 내부에서 호출됨)
-    # ensure_data_dir(HEARTBEAT_DATA_DIR, "Heartbeat")
-    # ensure_data_dir(USER_DATA_DIR, "사용자 프로필")
-
-    # 데이터 로딩 (전역 변수 직접 업데이트)
     global heartbeat_records, user_profiles
     load_all_data(HEARTBEAT_DATA_DIR, "Heartbeat", read_heartbeat_data, heartbeat_records)
     load_all_data(USER_DATA_DIR, "사용자 프로필", read_user_profile, user_profiles)
 
-    # 사용자 정보 소스(Pastebin)에서 ID 및 Code 업데이트 시도
     await update_user_profiles_from_source()
 
     # 누락된 Heartbeat 기록 스캔
@@ -373,7 +376,6 @@ async def on_ready():
                     timestamps.append(ts)
                 except ValueError:
                     logging.warning(f"⚠️ 사용자 '{user_name}'의 잘못된 타임스탬프 형식 발견 (로드 중): {record.get('timestamp')}")
-                    pass # 오류 무시하고 계속 진행
         if timestamps:
             overall_latest_timestamp = max(timestamps)
 
@@ -394,13 +396,15 @@ async def on_ready():
         channel_scanned = 0
         try:
             channel = await bot.fetch_channel(channel_id)
-            async for message in channel.history(limit=None, after=overall_latest_timestamp, oldest_first=True):
+            history_iterator = channel.history(limit=None, after=overall_latest_timestamp, oldest_first=True) if overall_latest_timestamp else channel.history(limit=10000, oldest_first=True)
+
+            async for message in history_iterator:
                 channel_scanned += 1
                 total_scanned += 1
                 if await process_heartbeat_message(message, channel_id_str, channel_name):
                     channel_processed_count += 1
                     history_processed_count += 1
-                if channel_scanned % 2000 == 0: # 로그 빈도 더 줄임
+                if channel_scanned % 2000 == 0:
                     logging.info(f"    [{channel_name}] {channel_scanned}개 메시지 스캔됨...")
 
             logging.info(f"    [{channel_name}] 스캔 완료 ({channel_scanned}개 스캔, {channel_processed_count}개 신규 처리).")
@@ -419,6 +423,10 @@ async def on_ready():
     logging.info(f'👂 감시 채널: {list(TARGET_CHANNEL_IDS.values())}')
     logging.info("--- 초기화 완료 ---")
 
+    # 초기 스캔 완료 이벤트 설정
+    initial_scan_complete_event.set()
+    logging.info("🏁 초기 스캔 완료 이벤트 설정됨. 주기적 상태 확인 시작 가능.")
+
 @bot.event
 async def on_message(message):
     """메시지 수신 시 실시간 처리"""
@@ -428,89 +436,395 @@ async def on_message(message):
         channel_name = TARGET_CHANNEL_IDS[message.channel.id]
         await process_heartbeat_message(message, channel_id_str, channel_name)
 
+# Placeholder for UserProfile and HeartbeatManager if they are not in the snippet
+# Ensure these classes exist and have the methods used below (get_profile, save_profiles, get_last_heartbeat)
+class UserProfile:
+    profiles = {}
+    data_file = 'data/user_data.json' # Example path
+
+    @classmethod
+    def load_profiles(cls):
+        # Load profiles from data_file
+        if os.path.exists(cls.data_file):
+            try:
+                with open(cls.data_file, 'r', encoding='utf-8') as f:
+                    cls.profiles = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error loading user profiles: {e}")
+                cls.profiles = {}
+        else:
+            cls.profiles = {}
+
+    @classmethod
+    def save_profiles(cls):
+        # Save profiles to data_file
+        try:
+            # Ensure data directory exists
+            os.makedirs(os.path.dirname(cls.data_file), exist_ok=True)
+            with open(cls.data_file, 'w', encoding='utf-8') as f:
+                json.dump(cls.profiles, f, indent=4)
+        except IOError as e:
+            print(f"Error saving user profiles: {e}")
+
+
+    @classmethod
+    def get_profile(cls, user_id_str):
+        return cls.profiles.get(user_id_str)
+
+class HeartbeatManager:
+    heartbeats = {} # { user_id_str: last_heartbeat_datetime }
+    # In a real scenario, this might load/save from a file or DB
+    @classmethod
+    def record_heartbeat(cls, user_id_str):
+        cls.heartbeats[user_id_str] = datetime.now(timezone.utc)
+        print(f"Heartbeat recorded for {user_id_str} at {cls.heartbeats[user_id_str]}")
+
+
+    @classmethod
+    def get_last_heartbeat(cls, user_id_str):
+        return cls.heartbeats.get(user_id_str)
+
+
+# --- Friend List Generation Logic ---
+async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
+    """
+    계산된 added_by_map을 기반으로 data/raw/ 디렉토리에
+    {username}_added_by 와 {username} 파일을 생성합니다.
+    !!! 이 함수는 호출 전에 friend_list_lock을 획득해야 합니다 !!!
+    user_profiles_for_gen: { user_id_str: { 'username': ..., ... } }
+    added_by_map: { u_id_str: [v1_id_str, v2_id_str...] }
+    """
+    # async with friend_list_lock: # 호출하는 쪽에서 락을 관리하도록 변경
+    raw_dir = "data/raw"
+    print(f"--- 친구 목록 파일 생성 시작 ({raw_dir}) ---")
+    target_barracks = 170 # 목표 배럭 수 정의
+
+    try:
+        if os.path.exists(raw_dir):
+            # print(f"기존 `{raw_dir}` 디렉토리 내용 삭제 중...") # 로그 간소화
+            for filename in os.listdir(raw_dir):
+                file_path = os.path.join(raw_dir, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                except Exception as e:
+                    print(f'파일 삭제 실패 {file_path}. 이유: {e}')
+        else:
+            # print(f"`{raw_dir}` 디렉토리 생성 중...") # 로그 간소화
+            os.makedirs(raw_dir, exist_ok=True)
+
+        add_list = {user_id: [] for user_id in user_profiles_for_gen}
+
+        for u_id_str, added_by_user_ids in added_by_map.items():
+            u_profile_info = user_profiles_for_gen.get(u_id_str)
+            if not u_profile_info:
+                 # print(f"경고: ...") # 로그 간소화
+                 continue
+
+            display_name_u = u_profile_info.get('username', u_id_str)
+            safe_display_name_u = sanitize_filename(display_name_u)
+            added_by_path = os.path.join(raw_dir, f"{safe_display_name_u}_added_by")
+
+            lines_for_added_by_file = []
+            total_barracks_for_u = 0
+            lines_for_added_by_file.append(f"Max Target Barracks: {target_barracks}")
+            u_barracks = u_profile_info.get('barracks', '?')
+            u_packs_list = u_profile_info.get('preferred_packs', [])
+            u_packs_str = ",".join(u_packs_list) if u_packs_list else "?"
+            lines_for_added_by_file.append(f"My Info: Username: {display_name_u} / Barracks: {u_barracks} / Packs: {u_packs_str}")
+            lines_for_added_by_file.append("")
+            lines_for_added_by_file.append("Friend Code\tUsername\tBarracks\tPacks")
+            lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
+
+            for v_id_str in added_by_user_ids:
+                v_profile_info = user_profiles_for_gen.get(v_id_str)
+                if not v_profile_info:
+                    # print(f"경고: ...") # 로그 간소화
+                    continue
+
+                v_friend_code = v_profile_info.get('friend_code', '코드없음')
+                v_username = v_profile_info.get('username', v_id_str)
+                v_barracks = v_profile_info.get('barracks', 0)
+                v_packs_list = v_profile_info.get('preferred_packs', [])
+                v_packs_str = ",".join(v_packs_list) if v_packs_list else "?"
+                line = f"{v_friend_code}\t{v_username}\t{v_barracks}\t{v_packs_str}"
+                lines_for_added_by_file.append(line)
+                total_barracks_for_u += v_barracks
+
+            lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
+            lines_for_added_by_file.append(f"Total Added Barracks:\t{total_barracks_for_u}")
+
+            try:
+                with open(added_by_path, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(lines_for_added_by_file))
+            except IOError as e:
+                 print(f"파일 쓰기 오류 ({added_by_path}): {e}")
+                 continue
+
+            u_friend_code = u_profile_info.get('friend_code')
+            if not u_friend_code:
+                continue
+
+            for v_id_str in added_by_user_ids:
+                if v_id_str in add_list:
+                   add_list[v_id_str].append(u_friend_code)
+
+        # print("`{username}` 파일 생성 중...") # 로그 간소화
+        for v_id_str, friend_codes_to_add in add_list.items():
+             v_profile_info = user_profiles_for_gen.get(v_id_str)
+             if v_profile_info:
+                 display_name_v = v_profile_info.get('username', v_id_str)
+                 safe_display_name_v = sanitize_filename(display_name_v)
+                 add_list_path = os.path.join(raw_dir, f"{safe_display_name_v}")
+                 try:
+                     with open(add_list_path, 'w', encoding='utf-8') as f:
+                         f.write('\n'.join(friend_codes_to_add))
+                 except IOError as e:
+                    print(f"파일 쓰기 오류 ({add_list_path}): {e}")
+
+        # print(f"--- 친구 목록 파일 생성 완료 ---") # finally 블록에서 출력
+
+    except Exception as e:
+        import traceback
+        print(f"친구 목록 파일 생성 중 심각한 오류 발생: {e}")
+        traceback.print_exc()
+    # finally:
+        # print(f"--- 친구 목록 파일 생성 완료 --- ") # 락 블록 밖에서 출력하는 것이 더 안전
+
+
+async def update_friend_lists(online_users_profiles):
+    """
+    온라인 유저 목록을 기반으로 초기 친구 추가 목록({username}_added_by)을 계산합니다.
+    online_users_profiles: { user_id_str: { 'username': str, 'barracks': int, 'preferred_packs': list, 'friend_code': str } }
+    반환값: 계산된 added_by_map
+    """
+    print("--- 초기 친구 목록 계산 시작 ---")
+    added_by_map = {} # 반환할 맵 초기화
+    if not online_users_profiles:
+        print("온라인 유저가 없어 초기 목록 계산을 건너뜁니다.")
+        # 파일 정리는 generate 함수에서 처리
+        return added_by_map # 빈 맵 반환
+
+    online_user_ids = list(online_users_profiles.keys())
+    total_barracks = sum(profile.get('barracks', 0) for profile in online_users_profiles.values())
+    target_barracks = 170
+    print(f"온라인 유저 수: {len(online_user_ids)}, 총 배럭: {total_barracks}, 목표 배럭: {target_barracks}")
+
+    added_by_map = {user_id: [] for user_id in online_user_ids}
+    add_count = {user_id: 0 for user_id in online_user_ids}
+
+    if total_barracks < target_barracks:
+        print("시나리오 1: 총 배럭 < 170. 모든 유저가 서로 추가합니다.")
+        for u_id in online_user_ids:
+            added_by_map[u_id] = [v_id for v_id in online_user_ids if u_id != v_id]
+        # print(f"...")
+    else:
+        print("시나리오 2/3: 총 배럭 >= 170. 유저별 목록 계산 시작 (친구 추가 수 균형 고려)...")
+        for u_id in online_user_ids:
+            u_profile = online_users_profiles[u_id]
+            u_preferred_packs = set(u_profile.get('preferred_packs', []))
+
+            preferred_matches_ids = []
+            other_matches_ids = []
+
+            for v_id in online_user_ids:
+                if u_id == v_id: continue
+                v_profile = online_users_profiles[v_id]
+                v_packs = set(v_profile.get('preferred_packs', []))
+                if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs):
+                    preferred_matches_ids.append(v_id)
+                else:
+                    other_matches_ids.append(v_id)
+
+            preferred_barracks_sum = sum(online_users_profiles[v_id].get('barracks', 0) for v_id in preferred_matches_ids)
+
+            current_added_by_ids = []
+            current_barracks = 0
+
+            if preferred_barracks_sum >= target_barracks:
+                preferred_matches_ids.sort(key=lambda v_id: add_count[v_id])
+                for v_id in preferred_matches_ids:
+                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
+                    if current_barracks + v_barracks <= target_barracks:
+                        current_added_by_ids.append(v_id)
+                        current_barracks += v_barracks
+                        add_count[v_id] += 1
+                    if current_barracks >= target_barracks:
+                        break
+            else:
+                for v_id in preferred_matches_ids:
+                    current_added_by_ids.append(v_id)
+                    current_barracks += online_users_profiles[v_id].get('barracks', 0)
+                    add_count[v_id] += 1
+
+                needed_barracks = target_barracks - current_barracks
+                other_matches_ids.sort(key=lambda v_id: add_count[v_id])
+                for v_id in other_matches_ids:
+                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
+                    if current_barracks + v_barracks <= target_barracks:
+                       current_added_by_ids.append(v_id)
+                       current_barracks += v_barracks
+                       add_count[v_id] += 1
+                    if current_barracks >= target_barracks:
+                        break
+            added_by_map[u_id] = current_added_by_ids
+
+    # 파일 생성은 별도 함수에서 하므로 여기서는 계산된 맵만 반환
+    print("--- 초기 친구 목록 계산 완료 ---")
+    return added_by_map
+
+# --- 최적화 로직 (Placeholder) ---
+def calculate_optimized_lists(current_added_by_map, online_users_profiles):
+    """ (Placeholder) 현재 친구 목록을 개선하는 로직. 실제 구현 필요. """
+    print("--- 친구 목록 최적화 계산 시작 (Placeholder) ---")
+    # TODO: 여기에 실제 최적화 알고리즘 구현
+    # 예: 가장 많은 친구를 추가해야 하는 유저(v_max)와 가장 적은 친구를 추가해야 하는 유저(v_min) 찾기
+    #     v_max 가 추가하는 u 중 일부를 v_min 이 추가하도록 변경 시도 (선호도, 배럭 조건 만족 시)
+    # 현재는 단순히 원본 맵을 그대로 반환 (변화 없음)
+    optimized_map = current_added_by_map.copy() # 수정하려면 복사본 사용
+    print("--- 친구 목록 최적화 계산 완료 (Placeholder) ---")
+    return optimized_map
+
+async def optimize_and_apply_lists(initial_added_by_map, online_profiles):
+    """ 최적화 계산 및 결과 적용 (변경 시에만 파일 생성) """
+    if not initial_added_by_map or not online_profiles:
+         print("최적화 건너뜀 (입력 데이터 부족)")
+         return
+
+    print("--- 유휴 시간 최적화 시작 ---")
+    # 최적화 계산 수행
+    optimized_map = calculate_optimized_lists(initial_added_by_map, online_profiles)
+
+    # 변경점 비교
+    if optimized_map != initial_added_by_map:
+        print("🔄 최적화 결과 변경점 발견! 새로운 친구 목록 적용 중...")
+        async with friend_list_lock: # 파일 쓰기 전에 락 획득
+             await generate_friend_list_files(optimized_map, online_profiles)
+        print("✅ 최적화된 친구 목록 적용 완료.")
+    else:
+        print(" değişiklik 없음. 최적화 결과 적용 안 함.")
+    print("--- 유휴 시간 최적화 완료 ---")
+
+# --- End Friend List Generation Logic ---
+
+
+# 첫 실행 플래그 (제거)
+# initial_run_complete = False
+
+# @tasks.loop(seconds=60) # tasks.loop 사용 시 아래 main의 bot.loop.create_task 불필요
 async def check_heartbeat_status():
-    """주기적으로 메모리 기반 사용자 상태 확인 (User 프로필 및 Heartbeat 기록 활용)"""
+    """주기적으로 메모리 기반 사용자 상태 확인 및 친구 목록 업데이트"""
     await bot.wait_until_ready()
+    logging.info("⏳ 주기적 상태 확인 시작 대기 중 (초기 스캔 완료 후 진행)...")
+    await initial_scan_complete_event.wait() # 초기 스캔 완료까지 대기
+    logging.info("▶️ 주기적 상태 확인 시작!")
+
+    raw_dir = "data/raw"
+
     while not bot.is_closed():
-        await asyncio.sleep(5) # 60초 간격
+        print("\n--- 사용자 상태 확인 시작 ---")
+        if test_flag:
+            print("⚠️ 테스트 모드 활성화: 모든 등록 유저를 온라인으로 간주합니다.")
 
         now_utc = datetime.now(timezone.utc)
         offline_threshold = timedelta(minutes=15)
 
-        # 로깅보다는 print가 적합한 상태 표시
-        print("\n--- 사용자 상태 확인 ---")
         online_users_status = []
         offline_users_status = []
+        current_online_profiles = {}
 
-        all_user_names = set(user_profiles.keys()) | set(heartbeat_records.keys())
+        all_user_names = list(user_profiles.keys())
 
         if not all_user_names:
-             print("  표시할 사용자 데이터가 없습니다.")
-             continue
+             print("  등록된 사용자가 없습니다.")
+        else:
+             print(f"  {len(all_user_names)}명의 등록된 사용자 상태 확인 중...")
 
-        for user_name in sorted(list(all_user_names)): # 이름 순 정렬
-            user_profile = user_profiles.get(user_name)
-            latest_heartbeat_info = heartbeat_records.get(user_name)
+        for user_name in all_user_names:
+            user_profile : User | None = user_profiles.get(user_name)
 
-            # 기본 정보 조합 (프로필 우선)
-            name = user_name
-            code = user_profile.code if user_profile else "코드?"
-            discord_id_str = f"<@{user_profile.discord_id}>" if user_profile and user_profile.discord_id else "ID?"
-            version = user_profile.version if user_profile else "버전?"
-            type_ = user_profile.type if user_profile else "타입?"
-            pack_select = user_profile.pack_select if user_profile else "팩?"
-            barracks = user_profile.barracks if user_profile else 0 # 프로필 또는 heartbeat에서 가져올 수 있도록 개선 여지 있음
+            if not user_profile or not isinstance(user_profile, User):
+                print(f"  경고: 사용자 '{user_name}'의 프로필(User 객체)을 찾을 수 없거나 형식이 잘못되었습니다.")
+                continue
 
-            status_prefix = f"{name} ({discord_id_str}, {code})"
-            status_suffix = f"(v:{version}|t:{type_}|p:{pack_select}|b:{barracks})"
+            user_id_str = user_profile.discord_id
+            display_name = user_profile.name
+            code_str = user_profile.code if user_profile.code else "코드?"
+            discord_mention = f"<@{user_id_str}>" if user_id_str else "ID?"
+            status_prefix = f"{display_name} ({discord_mention}, {code_str})"
+            pack_select_str = user_profile.pack_select
+            if isinstance(pack_select_str, list):
+                pack_select_str = ','.join(pack_select_str) if pack_select_str else "?"
+            status_suffix = f"(v:{user_profile.version}|t:{user_profile.type}|p:{pack_select_str}|b:{user_profile.barracks})"
+            full_status_str = f"{status_prefix} {status_suffix}"
 
             is_online = False
-            last_seen_str = "기록 없음"
+            last_heartbeat_dt = None # 오프라인 상태 문자열 출력을 위해 초기화
 
-            if latest_heartbeat_info and "latest_record" in latest_heartbeat_info:
-                latest_record = latest_heartbeat_info["latest_record"]
-                last_seen_iso = latest_record.get("timestamp")
-                if last_seen_iso:
-                    try:
-                        last_seen = datetime.fromisoformat(last_seen_iso.replace('Z', '+00:00'))
-                        if last_seen.tzinfo is None: last_seen = last_seen.replace(tzinfo=timezone.utc)
-                        last_seen_str = last_seen.strftime('%y/%m/%d %H:%M:%S') # 형식 변경
-
-                        if now_utc - last_seen <= offline_threshold:
-                            is_online = True
-                            # 최신 heartbeat 정보로 barracks 업데이트 (프로필보다 최신일 수 있음)
-                            barracks = latest_record.get('barracks', barracks)
-                            # 필요하다면 version, type, pack_select도 여기서 업데이트 가능
-                            status_suffix = f"(v:{latest_record.get('version', version)}|t:{latest_record.get('type', type_)}|p:{latest_record.get('select', pack_select)}|b:{barracks})"
-
-                    except ValueError:
-                        last_seen_str = "시간오류"
-                        logging.warning(f"사용자 '{user_name}'의 마지막 접속 시간 처리 오류: {last_seen_iso}")
-                else:
-                    last_seen_str = "시간없음"
-            # else: Heartbeat 기록 자체가 없는 경우 (프로필만 있거나) -> Offline
-
-            full_status_str = f"{status_prefix} {status_suffix}"
-            if is_online:
-                online_users_status.append(full_status_str)
+            if test_flag:
+                is_online = True # 테스트 모드 시 무조건 온라인
             else:
-                offline_users_status.append(f"{full_status_str} [마지막: {last_seen_str}]")
+                # 실제 하트비트 체크 로직
+                latest_heartbeat_info = heartbeat_records.get(user_name)
+                if latest_heartbeat_info and "latest_record" in latest_heartbeat_info:
+                    latest_record = latest_heartbeat_info["latest_record"]
+                    last_seen_iso = latest_record.get("timestamp")
+                    if last_seen_iso:
+                        try:
+                            ts = datetime.fromisoformat(last_seen_iso.replace('Z', '+00:00'))
+                            if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+                            last_heartbeat_dt = ts
+                            if (now_utc - last_heartbeat_dt) <= offline_threshold:
+                                is_online = True
+                        except ValueError:
+                             logging.warning(f"⚠️ 사용자 '{user_name}'의 잘못된 타임스탬프 형식 발견 (상태 확인 중): {last_seen_iso}")
+                             # last_heartbeat_dt 는 None 유지
 
-        # 결과 출력 (여전히 print 사용)
+            if is_online:
+                online_users_status.append(f"🟢 {full_status_str}")
+
+                if user_id_str:
+                    pref_packs = user_profile.pack_select
+                    if isinstance(pref_packs, str):
+                         pref_packs = [pref_packs] if pref_packs and pref_packs != "Unknown" else []
+
+                    current_online_profiles[user_id_str] = {
+                         'username': display_name,
+                         'barracks': user_profile.barracks,
+                         'preferred_packs': pref_packs,
+                         'friend_code': user_profile.code
+                     }
+                else:
+                     # 테스트 모드에서도 ID 없는 유저는 친구 목록 생성에서 제외
+                     print(f"  경고: 온라인 사용자 '{display_name}'의 Discord ID가 없어 친구 목록 생성에서 제외됩니다.")
+            else:
+                # 테스트 모드가 아닐 때만 오프라인 처리
+                last_seen_str = last_heartbeat_dt.strftime('%Y-%m-%d %H:%M:%S') if last_heartbeat_dt else "기록 없음"
+                offline_users_status.append(f"🔴 {full_status_str} [마지막: {last_seen_str}]")
+
         print(f"--- 확인 시간: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} ---")
-        print(f"--- Online ({len(online_users_status)}명) ---")
-        # if online_users_status:
-            # for status in online_users_status: print(f"  {status}")
-        # else:
-        #     print("  없음")
-
+        print(f"--- Online ({len(current_online_profiles)}명) ---")
+        for status in online_users_status: print(f"  {status}")
         print(f"--- Offline ({len(offline_users_status)}명) ---")
-        # if offline_users_status:
-        #     for status in offline_users_status: print(f"  {status}")
-        # else:
-        #     print("  없음")
-        print("----------------------------------------------\n")
-        await asyncio.sleep(55) # 60초 간격
+        for status in offline_users_status: print(f"  {status}")
+        print("----------------------------------------------")
+
+        # --- 친구 목록 업데이트 및 최적화 로직 호출 ---
+        # 1. 기본 친구 목록 계산 (매번 실행)
+        initial_map = await update_friend_lists(current_online_profiles)
+
+        # 2. 계산된 목록으로 파일 쓰기 (락 사용)
+        async with friend_list_lock:
+             print("기본 친구 목록 파일 생성 시도...")
+             await generate_friend_list_files(initial_map, current_online_profiles)
+             print("기본 친구 목록 파일 생성 완료.")
+
+        # 3. 유휴 시간 최적화 시도 (별도 함수 호출)
+        # 이 함수는 내부적으로 변경이 있을 때만 락을 잡고 파일을 씀
+        await optimize_and_apply_lists(initial_map, current_online_profiles)
+
+        print("--- 사용자 상태 확인 및 목록 업데이트 완료 ---")
+        await asyncio.sleep(60)
 
 
 async def main():
