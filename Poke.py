@@ -284,7 +284,7 @@ async def recent_godpack(Server):
 async def recent_online(Server):
     now = datetime.now(timezone.utc)
     
-    Threshold = {'Off' : now - timedelta(minutes=40),
+    Threshold = {'Off' : now - timedelta(minutes=15),
                  'Rest': now - timedelta(hours=24*7)}
 
     channel = await bot.fetch_channel(Server.ID)
@@ -310,7 +310,7 @@ async def recent_online(Server):
                         if USER_DICT[name].CODE not in Server.FILE.DATA and USER_DICT[name].off.get(Server.ID, None) is None:
                             USER_DICT[name].offlined(Server, message)
 
-        print(f"✅ 최근 40분 이내에 감지된 온라인 유저 수: {len(Server.FILE.DATA)}명")
+        print(f"✅ 최근 15분 이내에 감지된 온라인 유저 수: {len(Server.FILE.DATA)}명")
         Server.FILE.update()
         
     except Exception as e:
@@ -319,7 +319,7 @@ async def recent_online(Server):
 async def recent_offline(Server):
     now = datetime.now(timezone.utc)
     
-    Threshold = {'Off' : now - timedelta(minutes=40),
+    Threshold = {'Off' : now - timedelta(minutes=15),
                  'Rest': now - timedelta(hours=24*7)}
 
     channel = await bot.fetch_channel(Server.ID)
@@ -369,6 +369,7 @@ async def delete_thread(Server):
         
         threads = forum_channel.threads
         
+
         async for thread in forum_channel.archived_threads(limit=100):
             try:
                 if thread.archived:
@@ -377,7 +378,7 @@ async def delete_thread(Server):
                 threads.append(thread)
             except Exception as e:
                 print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
-                
+    
         for thread in threads :
             thread_tags_ids = [tag.id for tag in thread.applied_tags]
             
@@ -405,7 +406,7 @@ async def verify_periodic(Server):
         threads = forum_channel.threads
 
         forum_tags = forum_channel.available_tags
-        
+
         async for thread in forum_channel.archived_threads(limit=100):
             try:
                 if thread.archived:
@@ -414,7 +415,7 @@ async def verify_periodic(Server):
                 threads.append(thread)
             except Exception as e:
                 print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
-        
+
         THREAD_DICT = {"Yet":[], "Bad":[], "Good":[], "Notice":[], "Error":[]}
         
         for thread in threads :
@@ -622,7 +623,7 @@ async def on_message(message):
             
             try :
                 now = datetime.now(timezone.utc)
-                remove = [user for user in Server.ONLINE if now - user.inform[Server.ID]['TIME'] >= timedelta(minutes=40)]
+                remove = [user for user in Server.ONLINE if now - user.inform[Server.ID]['TIME'] >= timedelta(minutes=15)]
                 
                 if remove :
                     for user in remove :
@@ -1168,6 +1169,7 @@ async def barracks(ctx):
     Barracks    = {user.NAME : user.inform[ID].get('BARRACKS', 0) for user in Server.ONLINE}
     Mode        = {user.NAME : user.inform[ID].get('TYPE', None) for user in Server.ONLINE}
     Rate        = {user.NAME : user.inform[ID].get('AVG', 0.0) for user in Server.ONLINE}
+    Select      = {user.NAME : user.inform[ID].get('SELECT', 0.0) for user in Server.ONLINE}
     if Server.ONLINE:
         num_on = len(Barracks)
         Type = {3 : [], 5: [], None: []}
@@ -1177,7 +1179,20 @@ async def barracks(ctx):
         total_barracks = sum(Barracks.values())
         total_rate = sum(x for x in Rate.values() if not math.isnan(x))
         
+        Expand = {}
+        for name, select in Select.items():
+            if not math.isnan(Rate[name]):
+                for ex in select:
+                    expand_rate = Rate[name]/len(select)
+                    if Expand.get(ex, None):
+                        Expand[ex] += expand_rate
+                    else :
+                        Expand[ex] = expand_rate
+        
         text = f"현재 온라인 상태 ({num_on}명, 총 {total_barracks} 배럭 {round(total_rate,2):<5}Packs/min):\n"
+        for key, value in Expand.items():
+            text = text + f'{key:<10} : {round(value,2):<6}\n'
+        text = text + '\n'
         text_dict = {}
         for key in Type.keys():
             text_dict[key] = "\n".join(Type[key])
@@ -1196,13 +1211,81 @@ async def alive(ctx):
         text = Server.Health.strftime("%Y.%m.%d %H:%M:%S")
         await ctx.send(f"```{Server.FILE.NAME}의 마지막 점검\n{text}```")
         
+@bot.command()
+async def gohell(ctx, ID):
+    try:
+        Server = SERVER_DICT[int(ID)]
+        
+        forum_channel = await bot.fetch_channel(Server.POSTING)
+        forum_tags = forum_channel.available_tags
+        
+        threads = forum_channel.threads
+        
+        for thread in threads :
+            thread_tags = thread.applied_tags
+            thread_tags_ids = [tag.id for tag in thread_tags]
+            
+            now = datetime.now(timezone.utc)
+            one_day = now - timedelta(hours=24)
+            if Server.Tag["Yet"] in thread_tags_ids :
+                if thread.created_at < one_day :
+                    tag_id = Server.Tag["Bad"]
+                    bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
+                    await thread.edit(applied_tags = [bad_tag])
+                    
+        for key, value in Server.GODPACK.DATA.items():
+            if value == 'Yet':
+                parts = key.split()
+                KST = timezone(timedelta(hours=9))
+                timenow = datetime.now(KST)
+    
+                time_str = f"{parts[0]} {parts[1]}"
+                parsed_time = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+                
+                if abs(timenow - parsed_time) <= timedelta(hours=24) :
+                    print("변경되었습니다")
+                    Server.GODPACK.DATA[key] = 'Bad'
+        
+        Server.GODPACK.update()
+    except Exception as e:
+        print(e)
+            
+    
+
+@bot.command()
+async def clear(ctx, ID):
+    Server = SERVER_DICT[int(ID)]
+    
+    forum_channel = await bot.fetch_channel(Server.POSTING)
+    threads = forum_channel.threads
+    
+    for thread in threads :
+        thread_tags = thread.applied_tags
+        thread_tags_ids = [tag.id for tag in thread_tags]
+        
+        now = datetime.now(timezone.utc)
+        one_day = now - timedelta(hours=24)
+        if Server.Tag["Bad"] in thread_tags_ids :
+            if thread.created_at < one_day :
+                try :
+                    await thread.delete()
+                    print("삭제되었습니다")
+                    asyncio.sleep(5)
+                except Exception as e:
+                    print(f"{thread.name} 삭제에 실패했습니다", e)
+                
+    
+    
 
 async def main():
     asyncio.create_task(update_periodic())
+    
     for Server in SERVER_DICT.values() :
         asyncio.create_task(verify_periodic(Server))
+    """
     for Server in SERVER_DICT.values() :
         asyncio.create_task(delete_thread(Server))
+    """
     async with bot:
         await bot.start(DISCORD_TOKEN)
 
