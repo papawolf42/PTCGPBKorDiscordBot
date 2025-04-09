@@ -164,6 +164,32 @@ SERVER_DICT[ID] = SERVER(ID, Group5, GodPack5, DETECT, POSTING, COMMAND, MUSEUM,
 
 
 
+ID   = "os.getenv('GIST_ID_2')"
+NAME = "Group6"
+Group6 = TEXT(ID, NAME, False)
+
+ID   = "os.getenv('GIST_ID_3')"
+NAME = "GodPack6"
+GodPack6 = JSON(ID, NAME)
+
+ID      = os.getenv('DISCORD_GROUP6_HEARTBEAT_ID')
+DETECT  = os.getenv('DISCORD_GROUP6_DETECT_ID')
+POSTING = os.getenv('DISCORD_GROUP6_POSTING_ID')
+COMMAND = os.getenv('DISCORD_GROUP6_COMMAND_ID')
+MUSEUM  = os.getenv('DISCORD_GROUP6_MUSEUM_ID')
+TAG = {
+        "Yet"    : os.getenv('DISCORD_GROUP6_TAG_YET'),
+        "Good"   : os.getenv('DISCORD_GROUP6_TAG_GOOD'),
+        "Bad"    : os.getenv('DISCORD_GROUP6_TAG_BAD'),
+        "1P"     : os.getenv('DISCORD_GROUP6_TAG_1P'),
+        "2P"     : os.getenv('DISCORD_GROUP6_TAG_2P'),
+        "3P"     : os.getenv('DISCORD_GROUP6_TAG_3P'),
+        "4P"     : os.getenv('DISCORD_GROUP6_TAG_4P'),
+        "5P"     : os.getenv('DISCORD_GROUP6_TAG_5P'),
+        "Notice" : os.getenv('DISCORD_GROUP6_TAG_NOTICE')
+}
+SERVER_DICT[ID] = SERVER(ID, Group6, GodPack6, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+
 
 #  봇 권한 설정
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
@@ -345,7 +371,7 @@ async def update_periodic():
     Server_Channel = {ID : await bot.fetch_channel(ID) for ID, Server in SERVER_DICT.items()}
         
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
             
         RAW_GIST_DICT = {}
         for ID, Server in SERVER_DICT.items() :
@@ -363,7 +389,7 @@ async def update_periodic():
 
 async def delete_thread(Server):
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
         
         forum_channel = await bot.fetch_channel(Server.POSTING)
         
@@ -383,20 +409,31 @@ async def delete_thread(Server):
             thread_tags_ids = [tag.id for tag in thread.applied_tags]
             
             now = datetime.now(timezone.utc)
-            one_week_ago = now - timedelta(hours=24*7)
+            if Server.FILE.NAME in ['Group4', 'Group5']:
+                one_week_ago = now - timedelta(hours=24)
+            else :
+                one_week_ago = now - timedelta(hours=24*7)
             if Server.Tag["Bad"] in thread_tags_ids :
-                if thread.created_at < one_week_ago :
+                try :
+                    parts = thread.name.split()
+                    KST = timezone(timedelta(hours=9))
+                    time_str = f"{parts[7]} {parts[8]}"
+                    thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+                except :
+                    thread_created_at = thread.created_at
+                
+                if thread_created_at < one_week_ago :
                     try :
                         print(f"{thread.name}이 삭제 됩니다.")
                         await thread.delete()
-                        asyncio.sleep(5)
+                        await asyncio.sleep(5)
                     except Exception as e:
                         print(f"{thread.name} 삭제에 실패했습니다", e)
 
 
 async def verify_periodic(Server):
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(120)
         Server.Health = datetime.now(timezone.utc) + timedelta(hours=9)
         
         forum_channel = await bot.fetch_channel(Server.POSTING)
@@ -415,6 +452,35 @@ async def verify_periodic(Server):
                 threads.append(thread)
             except Exception as e:
                 print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
+        
+            
+        for thread in threads.copy() :
+            thread_tags_ids = [tag.id for tag in thread.applied_tags]
+            
+            now = datetime.now(timezone.utc)
+            if Server.FILE.NAME in ['Group4', 'Group5']:
+                one_week_ago = now - timedelta(hours=24)
+            else :
+                one_week_ago = now - timedelta(hours=24*7)
+            if Server.Tag["Bad"] in thread_tags_ids :
+                try :
+                    parts = thread.name.split()
+                    KST = timezone(timedelta(hours=9))
+                    time_str = f"{parts[7]} {parts[8]}"
+                    thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+                except :
+                    thread_created_at = thread.created_at
+                    
+                if thread_created_at < one_week_ago :
+                    try :
+                        print(f"{thread.name}이 삭제 됩니다.")
+                        await thread.delete()
+                        await asyncio.sleep(5)
+                        threads.remove(thread)
+                    except Exception as e:
+                        print(f"{thread.name} 삭제에 실패했습니다", e)
+                        
+            
 
         THREAD_DICT = {"Yet":[], "Bad":[], "Good":[], "Notice":[], "Error":[]}
         
@@ -433,8 +499,12 @@ async def verify_periodic(Server):
                 two_ago   = now - timedelta(hours=24)
                 three_ago = now - timedelta(hours=36)
                 
-                time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
-                                  "4P" : three_ago, "5P" : three_ago}
+                if Server.FILE.NAME in ['Group4', 'Group5']:
+                    time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
+                                      "4P" : two_ago, "5P" : two_ago}
+                else :
+                    time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
+                                      "4P" : three_ago, "5P" : three_ago}
                 
                 bad_threshold  = {"2P" : 5, "3P" : 8, "4P" : 11, "5P" : 14}
                 
@@ -453,7 +523,14 @@ async def verify_periodic(Server):
                         bad += 1
                     elif "❓" in reply.content :
                         no += 1
-                        
+                try :
+                    parts = thread.name.split()
+                    KST = timezone(timedelta(hours=9))
+                    time_str = f"{parts[7]} {parts[8]}"
+                    thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+                except :
+                    thread_created_at = thread.created_at
+                    
                 if good >= 1 :
                     tag_id = Server.Tag["Good"]
                     good_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
@@ -464,7 +541,7 @@ async def verify_periodic(Server):
                     pack = title_divide[5]
                     
                     if no >= 3 and bad == 0 :
-                        if thread.created_at < one_ago :
+                        if thread_created_at < one_ago :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
                             THREAD_DICT["Bad"].append(thread)
@@ -474,7 +551,7 @@ async def verify_periodic(Server):
                         
                     
                     elif pack in ["2P", "3P", "4P", "5P"] :
-                        if thread.created_at < time_threshold[pack] or bad >= bad_threshold[pack] :
+                        if thread_created_at < time_threshold[pack] or bad >= bad_threshold[pack] :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
                             THREAD_DICT["Bad"].append(thread)
@@ -483,7 +560,7 @@ async def verify_periodic(Server):
                             THREAD_DICT["Yet"].append(thread)
                     
                     elif pack == "1P" :
-                        if thread.created_at < time_threshold[pack] :
+                        if thread_created_at < time_threshold[pack] :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
                             THREAD_DICT["Bad"].append(thread)
@@ -517,7 +594,6 @@ async def verify_periodic(Server):
                 if title in [temp.name for temp in THREAD_DICT["Good"]] :
                     thread = next((temp for temp in THREAD_DICT["Good"] if title == temp.name), None)
                     Server.GODPACK.edit('+', text, "Good")
-                    Server.GODPACK.update()
                     print(f"❗❗ {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
                     await alert_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
                     await main_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다. ({Server.FILE.NAME})")
@@ -528,8 +604,7 @@ async def verify_periodic(Server):
                         print(f"{title} 박물관 전시 실패! ", e)
                 
                 elif title in [temp.name for temp in THREAD_DICT["Bad"]] :
-                    Server.GODPACK.edit('+', text, "Bad")
-                    Server.GODPACK.update()
+                    Server.GODPACK.edit('+', text, "Bad") 
                     print(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
                     await alert_channel.send(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
                 elif title in [temp.name for temp in THREAD_DICT["Error"]] :
@@ -567,8 +642,13 @@ async def verify_periodic(Server):
                                         
                     except Exception as e:
                         print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
-                        
-                    await Server.Post(forum_channel, images, inform, title)
+                    try:
+                        await Server.Post(forum_channel, images, inform, title)
+                    except Exception as e:
+                        print(f"{title} 포스팅 실패 : ", e)
+                    await asyncio.sleep(5)
+        Server.GODPACK.update()
+            
                         
 
 @bot.event
@@ -579,6 +659,7 @@ async def on_ready():
         await recent_online(server)
     for server in SERVER_DICT.values():
         await recent_godpack(server)
+        await asyncio.sleep(60)
     for server in SERVER_DICT.values():
         await recent_offline(server)
 
@@ -595,21 +676,19 @@ async def on_message(message):
             Server = SERVER_DICT[message.channel.id]
             name = message.content.split("\n")[0].strip()
             if name in USER_DICT.keys():
-                """
-                if Server.FILE.NAME == 'Group1':
-                    Another = SERVER_DICT[os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')]
-                    USER_DICT[name].called(Another, message)
-                    if USER_DICT[name].CODE not in Another.FILE.DATA:
-                        USER_DICT[name].online(Another)
-                        Another.FILE.update()
+                if Server.FILE.NAME == 'Group6':
+                    Group1_Server = SERVER_DICT[os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')]
+                    USER_DICT[name].called(Group1_Server, message)
+                    if USER_DICT[name].CODE not in Group1_Server.FILE.DATA:
+                        USER_DICT[name].online(Group1_Server)
+                        Group1_Server.FILE.update()
                     
-                if Server.FILE.NAME == 'Group3':
-                    Another = SERVER_DICT[os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')]
-                    USER_DICT[name].called(Another, message)
-                    if USER_DICT[name].CODE not in Another.FILE.DATA:
-                        USER_DICT[name].online(Another)
-                        Another.FILE.update()
-                """
+                    Group3_Server = SERVER_DICT[os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')]
+                    USER_DICT[name].called(Group3_Server, message)
+                    if USER_DICT[name].CODE not in Group3_Server.FILE.DATA:
+                        USER_DICT[name].online(Group3_Server)
+                        Group3_Server.FILE.update()
+                        
                 USER_DICT[name].called(Server, message)
                 if USER_DICT[name].CODE not in Server.FILE.DATA:
                     print(f"✅ 수집된 이름: {name}, 코드 : {USER_DICT[name].CODE}")
@@ -912,10 +991,16 @@ async def reply(ctx):
             for thread in threads :
                 now = datetime.now(timezone.utc)
                 days_ago = now - timedelta(hours=96)
-                
                 one_day = now - timedelta(hours=24)
-                
-                if thread.created_at > days_ago :
+
+                try :
+                    parts = thread.name.split()
+                    KST = timezone(timedelta(hours=9))
+                    time_str = f"{parts[7]} {parts[8]}"
+                    thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+                except :
+                    thread_created_at = thread.created_at
+                if thread_created_at > days_ago :
                     Recent_thread.append(thread)
                     
             for post in Recent_thread :
@@ -972,8 +1057,16 @@ async def custom(ctx):
     for thread in threads :
         now = datetime.now(timezone.utc)
         days_ago = now - timedelta(hours=96)
+
+        try :
+            parts = thread.name.split()
+            KST = timezone(timedelta(hours=9))
+            time_str = f"{parts[7]} {parts[8]}"
+            thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+        except :
+            thread_created_at = thread.created_at
         
-        if thread.created_at > days_ago :
+        if thread_created_at > days_ago :
             Recent_thread.append(thread)
     
     Yet_thread  = []
@@ -1211,68 +1304,6 @@ async def alive(ctx):
         text = Server.Health.strftime("%Y.%m.%d %H:%M:%S")
         await ctx.send(f"```{Server.FILE.NAME}의 마지막 점검\n{text}```")
         
-@bot.command()
-async def gohell(ctx, ID):
-    try:
-        Server = SERVER_DICT[int(ID)]
-        
-        forum_channel = await bot.fetch_channel(Server.POSTING)
-        forum_tags = forum_channel.available_tags
-        
-        threads = forum_channel.threads
-        
-        for thread in threads :
-            thread_tags = thread.applied_tags
-            thread_tags_ids = [tag.id for tag in thread_tags]
-            
-            now = datetime.now(timezone.utc)
-            one_day = now - timedelta(hours=24)
-            if Server.Tag["Yet"] in thread_tags_ids :
-                if thread.created_at < one_day :
-                    tag_id = Server.Tag["Bad"]
-                    bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
-                    await thread.edit(applied_tags = [bad_tag])
-                    
-        for key, value in Server.GODPACK.DATA.items():
-            if value == 'Yet':
-                parts = key.split()
-                KST = timezone(timedelta(hours=9))
-                timenow = datetime.now(KST)
-    
-                time_str = f"{parts[0]} {parts[1]}"
-                parsed_time = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
-                
-                if abs(timenow - parsed_time) <= timedelta(hours=24) :
-                    print("변경되었습니다")
-                    Server.GODPACK.DATA[key] = 'Bad'
-        
-        Server.GODPACK.update()
-    except Exception as e:
-        print(e)
-            
-    
-
-@bot.command()
-async def clear(ctx, ID):
-    Server = SERVER_DICT[int(ID)]
-    
-    forum_channel = await bot.fetch_channel(Server.POSTING)
-    threads = forum_channel.threads
-    
-    for thread in threads :
-        thread_tags = thread.applied_tags
-        thread_tags_ids = [tag.id for tag in thread_tags]
-        
-        now = datetime.now(timezone.utc)
-        one_day = now - timedelta(hours=24)
-        if Server.Tag["Bad"] in thread_tags_ids :
-            if thread.created_at < one_day :
-                try :
-                    await thread.delete()
-                    print("삭제되었습니다")
-                    asyncio.sleep(5)
-                except Exception as e:
-                    print(f"{thread.name} 삭제에 실패했습니다", e)
                 
     
     
@@ -1282,10 +1313,6 @@ async def main():
     
     for Server in SERVER_DICT.values() :
         asyncio.create_task(verify_periodic(Server))
-    """
-    for Server in SERVER_DICT.values() :
-        asyncio.create_task(delete_thread(Server))
-    """
     async with bot:
         await bot.start(DISCORD_TOKEN)
 
