@@ -28,7 +28,7 @@ USER_INFO_SOURCE_URL = "os.getenv('PASTEBIN_URL')" # 사용자 정보 소스 URL
 GROUP_CONFIGS = [
     {
         "NAME": "Group6",
-        "HEARTBEAT_ID": os.getenv('DISCORD_GROUP1_HEARTBEAT_ID'), # Heartbeat (예시, 실제 그룹 ID에 맞게 조정 필요)
+        "HEARTBEAT_ID": os.getenv('DISCORD_GROUP6_HEARTBEAT_ID'), # Heartbeat (예시, 실제 그룹 ID에 맞게 조정 필요)
         "DETECT_ID": os.getenv('DISCORD_GROUP6_DETECT_ID'), # GP webhook
         "POSTING_ID": os.getenv('DISCORD_GROUP6_POSTING_ID'),
         "COMMAND_ID": 1356656481180848195,
@@ -66,7 +66,7 @@ heartbeat_records = {}
 user_profiles = {}
 
 # 테스트 플래그
-test_flag = True # True로 설정 시 모든 등록 유저를 온라인으로 간주, False로 설정 시 온라인 유저만 감지
+test_flag = False # True로 설정 시 모든 등록 유저를 온라인으로 간주, False로 설정 시 온라인 유저만 감지
 
 # asyncio 이벤트 추가
 initial_scan_complete_event = asyncio.Event()
