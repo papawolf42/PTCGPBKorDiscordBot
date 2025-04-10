@@ -606,12 +606,7 @@ async def on_message(message):
                         if not test_flag:
                             try:
                                 alert_channel = message.channel
-                                alert_message = (
-                                    f"⚠️ 사용자 **{target_user_name}** (<@{discord_id_str}>)의 목표 배럭이 자동으로 조정되었습니다. (테스트)\n"
-                                    f"- 이전 목표: `{effective_current_target}`\n"
-                                    f"- 새 목표: `{new_target_barracks}`\n"
-                                    f"- 사유: 친구 추가 중 인스턴스 오류 발생 감지"
-                                )
+                                alert_message = f"⚠️ 사용자 **{target_user_name}**(<@{discord_id_str}>) 목표 배럭 자동 조정: `{effective_current_target}` -> `{new_target_barracks}` (오류 감지)"
                                 await alert_channel.send(alert_message)
                                 logging.info(f"  - 알림 메시지 전송 완료 (채널: {alert_channel.id}).")
                             except discord.Forbidden:
@@ -724,9 +719,11 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
             lines_for_added_by_file.append("Friend Code\tUsername\tBarracks\tPacks")
             lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
 
-            actual_friends_added = [v_id for v_id in added_by_user_ids if v_id != u_id_str]
+            # 자기 자신을 제외하는 필터링 제거 - added_by_user_ids 리스트를 직접 사용
+            # actual_friends_added = [v_id for v_id in added_by_user_ids if v_id != u_id_str]
 
-            for v_id_str in actual_friends_added:
+            # 이제 added_by_user_ids 리스트에는 u_id_str 본인이 포함됨
+            for v_id_str in added_by_user_ids: # 필터링된 리스트 대신 원본 리스트 사용
                 v_profile_info = user_profiles_for_gen.get(v_id_str)
                 if not v_profile_info: continue
 
@@ -737,7 +734,7 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
                 v_packs_str = ",".join(v_packs_list) if v_packs_list else "?"
                 line = f"{v_friend_code}\t{v_username}\t{v_barracks}\t{v_packs_str}"
                 lines_for_added_by_file.append(line)
-                total_barracks_for_u += v_barracks
+                total_barracks_for_u += v_barracks # 본인 배럭도 합산됨
 
             lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
             lines_for_added_by_file.append(f"Total Added Friend Barracks:\t{total_barracks_for_u}")
@@ -749,9 +746,11 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
             u_friend_code = u_profile_info.get('friend_code')
             if not u_friend_code: continue
 
-            for v_id_str in actual_friends_added:
-                if v_id_str in add_list:
-                   add_list[v_id_str].append(u_friend_code)
+            # 친구 추가 목록 생성 시에도 원본 리스트 사용 (여기서는 이미 actual_friends_added를 사용하지 않음)
+            for v_id_str in added_by_user_ids: # 명확성을 위해 원본 리스트 사용 명시 (기존 로직상 큰 변경은 없을 수 있음)
+                if v_id_str != u_id_str: # 다른 사용자에게만 내 코드를 추가해야 함
+                    if v_id_str in add_list:
+                       add_list[v_id_str].append(u_friend_code)
 
         for v_id_str, friend_codes_to_add in add_list.items():
              v_profile_info = user_profiles_for_gen.get(v_id_str)
