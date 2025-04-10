@@ -23,6 +23,7 @@ DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN') # 봇 토큰
 HEARTBEAT_DATA_DIR = "data/heartbeat_data" # 데이터 저장 폴더
 USER_DATA_DIR = "data/user_data" # 사용자 프로필 데이터 저장 폴더
 USER_INFO_SOURCE_URL = "os.getenv('PASTEBIN_URL')" # 사용자 정보 소스 URL
+TARGET_BARRACKS_DEFAULT = 170 # 기본 목표 배럭 정의
 
 # --- 그룹 설정 (newGroup.py 정보 기반) ---
 GROUP_CONFIGS = [
@@ -65,6 +66,9 @@ heartbeat_records = {}
 # 사용자 프로필 정보 (메모리): {user_name: User}
 user_profiles = {}
 
+# 마이그레이션 플래그 (True일 경우 Group6 친추 시 Group1/3 우선 배정)
+migration_flag = True # 필요에 따라 False로 변경
+
 # 테스트 플래그
 test_flag = False # True로 설정 시 모든 등록 유저를 온라인으로 간주, False로 설정 시 온라인 유저만 감지
 
@@ -83,6 +87,8 @@ class User:
         self.pack_select = "Unknown"
         self.code: str | None = None # 친구 코드
         self.discord_id: str | None = None # 디스코드 ID
+        self.group_name: str | None = None # 사용자의 현재 소속 그룹 (최신 Heartbeat 기반)
+        self.custom_target_barracks: int | None = None # 사용자 지정 목표 배럭
 
     def update_from_heartbeat(self, heartbeat_data):
         """Heartbeat 데이터로 사용자 정보 업데이트 (타임스탬프/채널 제외)"""
@@ -108,6 +114,8 @@ class User:
             'pack_select': self.pack_select,
             'code': self.code,
             'discord_id': self.discord_id,
+            'group_name': self.group_name,
+            'custom_target_barracks': self.custom_target_barracks,
         }
 
     @classmethod
@@ -120,8 +128,20 @@ class User:
         user.version = data.get('version', "Unknown")
         user.type = data.get('type', "Unknown")
         user.pack_select = data.get('pack_select', "Unknown")
-        user.code = data.get('code') # 없으면 None
-        user.discord_id = data.get('discord_id') # 없으면 None
+        user.code = data.get('code')
+        user.discord_id = data.get('discord_id')
+        user.group_name = data.get('group_name')
+        # custom_target_barracks 로드 시 정수형 변환 시도
+        custom_target = data.get('custom_target_barracks')
+        if custom_target is not None:
+            try:
+                user.custom_target_barracks = int(custom_target)
+            except (ValueError, TypeError):
+                logging.warning(f"⚠️ 사용자 '{user.name}'의 custom_target_barracks 값('{custom_target}')이 유효한 숫자가 아니므로 무시합니다.")
+                user.custom_target_barracks = None # 유효하지 않으면 None으로 설정
+        else:
+            user.custom_target_barracks = None
+
         return user
 
 # --- 데이터 처리 함수 (공통) ---
@@ -205,12 +225,29 @@ def write_heartbeat_data(user_name, data_list):
 
 # --- 데이터 처리 함수 (User Profile) ---
 def read_user_profile(user_name):
-    """사용자 프로필 JSON 파일 읽기 (User 객체 반환, 없거나 오류 시 None)"""
+    """사용자 프로필 JSON 파일 읽기 (User 객체 반환, 없거나 오류 시 None)
+    파일 로드 시 custom_target_barracks 키가 없으면 기본값(TARGET_BARRACKS_DEFAULT)을 추가하고 파일을 업데이트합니다.
+    """
     filepath = get_data_filepath(user_name, USER_DATA_DIR)
     data = read_json_file(filepath, "프로필", user_name, None)
     if data:
+        needs_update = False
+        # --- custom_target_barracks 키 확인 및 기본값 추가 ---
+        if 'custom_target_barracks' not in data:
+            # logging.info(f"  정보: 사용자 '{user_name}' 프로필에 custom_target_barracks 없음. 기본값 {TARGET_BARRACKS_DEFAULT} 추가.") # 로그 필요 시
+            data['custom_target_barracks'] = TARGET_BARRACKS_DEFAULT # 기본값 추가
+            needs_update = True
+        # --- 키 확인 및 기본값 추가 끝 ---
+
         user = User.from_dict(data)
         if user:
+            # --- 파일 업데이트 (필요한 경우) ---
+            if needs_update:
+                logging.info(f"  💾 사용자 '{user_name}' 프로필 파일 업데이트 (custom_target_barracks 추가됨).")
+                if not write_user_profile(user): # 수정된 user 객체를 다시 저장
+                    logging.warning(f"⚠️ 사용자 '{user_name}' 프로필 파일 업데이트 실패: {filepath}")
+                    # 업데이트 실패해도 로드된 user 객체는 반환
+            # --- 파일 업데이트 끝 ---
             return user
         else:
             logging.warning(f"⚠️ 사용자 '{user_name}' 프로필 파일 데이터 유효하지 않음: {filepath}. None 반환.")
@@ -517,7 +554,7 @@ async def on_message(message):
         detect_channel_id = config.get("DETECT_ID")
         if detect_channel_id and channel_id == detect_channel_id:
             # logging.info(f"Processing GP Result for {group_name}...") # 디버깅 로그 필요 시
-            await process_gp_result_message(message, config)
+            # await process_gp_result_message(message, config)
             return # 메시지 처리가 완료되었으므로 루프 종료
 
         # TODO: COMMAND 채널 처리 로직 추가 필요
@@ -547,17 +584,14 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
     계산된 added_by_map을 기반으로 data/raw/ 디렉토리에
     {username}_added_by 와 {username} 파일을 생성합니다.
     !!! 이 함수는 호출 전에 friend_list_lock을 획득해야 합니다 !!!
-    user_profiles_for_gen: { user_id_str: { 'username': ..., ... } }
+    user_profiles_for_gen: { user_id_str: { ..., 'custom_target_barracks': int | None } }
     added_by_map: { u_id_str: [v1_id_str, v2_id_str...] }
     """
-    # async with friend_list_lock: # 호출하는 쪽에서 락을 관리하도록 변경
     raw_dir = "data/raw"
     print(f"--- 친구 목록 파일 생성 시작 ({raw_dir}) ---")
-    target_barracks = 170 # 목표 배럭 수 정의
 
     try:
         if os.path.exists(raw_dir):
-            # print(f"기존 `{raw_dir}` 디렉토리 내용 삭제 중...") # 로그 간소화
             for filename in os.listdir(raw_dir):
                 file_path = os.path.join(raw_dir, filename)
                 try:
@@ -566,16 +600,20 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
                 except Exception as e:
                     print(f'파일 삭제 실패 {file_path}. 이유: {e}')
         else:
-            # print(f"`{raw_dir}` 디렉토리 생성 중...") # 로그 간소화
             os.makedirs(raw_dir, exist_ok=True)
 
         add_list = {user_id: [] for user_id in user_profiles_for_gen}
 
         for u_id_str, added_by_user_ids in added_by_map.items():
             u_profile_info = user_profiles_for_gen.get(u_id_str)
-            if not u_profile_info:
-                 # print(f"경고: ...") # 로그 간소화
-                 continue
+            if not u_profile_info: continue
+
+            # --- 사용자별 목표 배럭 결정 (파일 출력용) ---
+            custom_target_u = u_profile_info.get('custom_target_barracks')
+            display_target_barracks = TARGET_BARRACKS_DEFAULT
+            if custom_target_u is not None and isinstance(custom_target_u, int) and custom_target_u > 0:
+                display_target_barracks = custom_target_u
+            # --- 사용자별 목표 배럭 결정 끝 ---
 
             display_name_u = u_profile_info.get('username', u_id_str)
             safe_display_name_u = sanitize_filename(display_name_u)
@@ -583,7 +621,7 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
 
             lines_for_added_by_file = []
             total_barracks_for_u = 0
-            lines_for_added_by_file.append(f"Max Target Barracks: {target_barracks}")
+            lines_for_added_by_file.append(f"Max Target Barracks: {display_target_barracks}") # 사용자별 목표 표시
             u_barracks = u_profile_info.get('barracks', '?')
             u_packs_list = u_profile_info.get('preferred_packs', [])
             u_packs_str = ",".join(u_packs_list) if u_packs_list else "?"
@@ -592,11 +630,11 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
             lines_for_added_by_file.append("Friend Code\tUsername\tBarracks\tPacks")
             lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
 
-            for v_id_str in added_by_user_ids:
+            actual_friends_added = [v_id for v_id in added_by_user_ids if v_id != u_id_str]
+
+            for v_id_str in actual_friends_added:
                 v_profile_info = user_profiles_for_gen.get(v_id_str)
-                if not v_profile_info:
-                    # print(f"경고: ...") # 로그 간소화
-                    continue
+                if not v_profile_info: continue
 
                 v_friend_code = v_profile_info.get('friend_code', '코드없음')
                 v_username = v_profile_info.get('username', v_id_str)
@@ -608,24 +646,19 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
                 total_barracks_for_u += v_barracks
 
             lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
-            lines_for_added_by_file.append(f"Total Added Barracks:\t{total_barracks_for_u}")
+            lines_for_added_by_file.append(f"Total Added Friend Barracks:\t{total_barracks_for_u}")
 
             try:
-                with open(added_by_path, 'w', encoding='utf-8') as f:
-                    f.write('\n'.join(lines_for_added_by_file))
-            except IOError as e:
-                 print(f"파일 쓰기 오류 ({added_by_path}): {e}")
-                 continue
+                with open(added_by_path, 'w', encoding='utf-8') as f: f.write('\n'.join(lines_for_added_by_file))
+            except IOError as e: print(f"파일 쓰기 오류 ({added_by_path}): {e}"); continue
 
             u_friend_code = u_profile_info.get('friend_code')
-            if not u_friend_code:
-                continue
+            if not u_friend_code: continue
 
-            for v_id_str in added_by_user_ids:
+            for v_id_str in actual_friends_added:
                 if v_id_str in add_list:
                    add_list[v_id_str].append(u_friend_code)
 
-        # print("`{username}` 파일 생성 중...") # 로그 간소화
         for v_id_str, friend_codes_to_add in add_list.items():
              v_profile_info = user_profiles_for_gen.get(v_id_str)
              if v_profile_info:
@@ -633,99 +666,158 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
                  safe_display_name_v = sanitize_filename(display_name_v)
                  add_list_path = os.path.join(raw_dir, f"{safe_display_name_v}")
                  try:
-                     with open(add_list_path, 'w', encoding='utf-8') as f:
-                         f.write('\n'.join(friend_codes_to_add))
-                 except IOError as e:
-                    print(f"파일 쓰기 오류 ({add_list_path}): {e}")
-
-        # print(f"--- 친구 목록 파일 생성 완료 ---") # finally 블록에서 출력
+                     with open(add_list_path, 'w', encoding='utf-8') as f: f.write('\n'.join(friend_codes_to_add))
+                 except IOError as e: print(f"파일 쓰기 오류 ({add_list_path}): {e}")
 
     except Exception as e:
         import traceback
         print(f"친구 목록 파일 생성 중 심각한 오류 발생: {e}")
         traceback.print_exc()
-    # finally:
-        # print(f"--- 친구 목록 파일 생성 완료 --- ") # 락 블록 밖에서 출력하는 것이 더 안전
-
 
 async def update_friend_lists(online_users_profiles):
     """
     온라인 유저 목록을 기반으로 초기 친구 추가 목록({username}_added_by)을 계산합니다.
-    online_users_profiles: { user_id_str: { 'username': str, 'barracks': int, 'preferred_packs': list, 'friend_code': str } }
+    사용자별 custom_target_barracks를 우선 적용하고, 없으면 TARGET_BARRACKS_DEFAULT를 사용합니다.
+    migration_flag가 True이면 Group6 유저는 Group1/3 유저를 우선 추가합니다.
+    online_users_profiles: { user_id_str: { ..., 'custom_target_barracks': int | None } }
     반환값: 계산된 added_by_map
     """
     print("--- 초기 친구 목록 계산 시작 ---")
-    added_by_map = {} # 반환할 맵 초기화
+    added_by_map = {}
     if not online_users_profiles:
         print("온라인 유저가 없어 초기 목록 계산을 건너뜁니다.")
-        # 파일 정리는 generate 함수에서 처리
-        return added_by_map # 빈 맵 반환
+        return added_by_map
 
     online_user_ids = list(online_users_profiles.keys())
-    total_barracks = sum(profile.get('barracks', 0) for profile in online_users_profiles.values())
-    target_barracks = 170
-    print(f"온라인 유저 수: {len(online_user_ids)}, 총 배럭: {total_barracks}, 목표 배럭: {target_barracks}")
+    total_barracks_all_online = sum(profile.get('barracks', 0) for profile in online_users_profiles.values())
+    print(f"온라인 유저 수: {len(online_user_ids)}, 총 배럭: {total_barracks_all_online}, 기본 목표 배럭: {TARGET_BARRACKS_DEFAULT}")
 
-    added_by_map = {user_id: [] for user_id in online_user_ids}
+    # --- 그룹별 배럭 현황 계산 및 출력 ---
+    group_barracks = {"Group1": 0, "Group3": 0, "Group6": 0, "Other": 0, "Unknown": 0}
+    for profile in online_users_profiles.values():
+        group = profile.get('group_name')
+        barracks = profile.get('barracks', 0)
+        if group in group_barracks: group_barracks[group] += barracks
+        elif group: group_barracks["Other"] += barracks
+        else: group_barracks["Unknown"] += barracks
+
+    print("그룹별 온라인 배럭 현황:")
+    for group, barracks in group_barracks.items():
+        if barracks > 0 or group in ["Group1", "Group3", "Group6"]:
+            print(f"  - {group}: {barracks} 배럭")
+    # --- 그룹별 배럭 현황 계산 및 출력 끝 ---
+
+    added_by_map = {user_id: [user_id] for user_id in online_user_ids}
     add_count = {user_id: 0 for user_id in online_user_ids}
 
-    if total_barracks < target_barracks:
-        print("시나리오 1: 총 배럭 < 170. 모든 유저가 서로 추가합니다.")
+    if total_barracks_all_online < TARGET_BARRACKS_DEFAULT:
+        print(f"시나리오 1 추정: 총 배럭({total_barracks_all_online}) < 기본 목표({TARGET_BARRACKS_DEFAULT}). 모든 유저가 서로 추가 시도.")
         for u_id in online_user_ids:
-            added_by_map[u_id] = [v_id for v_id in online_user_ids if u_id != v_id]
-        # print(f"...")
+            added_by_map[u_id].extend([v_id for v_id in online_user_ids if u_id != v_id])
     else:
-        print("시나리오 2/3: 총 배럭 >= 170. 유저별 목록 계산 시작 (친구 추가 수 균형 고려)...")
+        print(f"시나리오 2/3: 총 배럭 >= 기본 목표. 유저별 목록 계산 시작 (migration_flag: {migration_flag})...")
         for u_id in online_user_ids:
             u_profile = online_users_profiles[u_id]
+
+            # --- 사용자별 유효 목표 배럭 결정 ---
+            custom_target = u_profile.get('custom_target_barracks')
+            effective_target_barracks = TARGET_BARRACKS_DEFAULT
+            if custom_target is not None and isinstance(custom_target, int) and custom_target > 0:
+                 effective_target_barracks = custom_target
+            # --- 사용자별 유효 목표 배럭 결정 끝 ---
+
+            u_group = u_profile.get('group_name')
             u_preferred_packs = set(u_profile.get('preferred_packs', []))
+            current_barracks = u_profile.get('barracks', 0)
+            current_added_by_ids = [u_id]
 
-            preferred_matches_ids = []
-            other_matches_ids = []
-
+            # --- 친구 후보 분류 ---
+            group1_3_candidates = []
+            group6_candidates = []
+            other_group_candidates = []
             for v_id in online_user_ids:
                 if u_id == v_id: continue
                 v_profile = online_users_profiles[v_id]
-                v_packs = set(v_profile.get('preferred_packs', []))
-                if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs):
-                    preferred_matches_ids.append(v_id)
-                else:
-                    other_matches_ids.append(v_id)
+                v_group = v_profile.get('group_name')
+                if v_group == "Group1" or v_group == "Group3": group1_3_candidates.append(v_id)
+                elif v_group == "Group6": group6_candidates.append(v_id)
+                else: other_group_candidates.append(v_id)
 
-            preferred_barracks_sum = sum(online_users_profiles[v_id].get('barracks', 0) for v_id in preferred_matches_ids)
-
-            current_added_by_ids = []
-            current_barracks = 0
-
-            if preferred_barracks_sum >= target_barracks:
-                preferred_matches_ids.sort(key=lambda v_id: add_count[v_id])
-                for v_id in preferred_matches_ids:
+            # --- 친구 선택 로직 (effective_target_barracks 사용) ---
+            if migration_flag and u_group == "Group6":
+                # ** 마이그레이션 모드 & Group6 유저 **
+                group1_3_candidates.sort(key=lambda v_id: add_count[v_id])
+                for v_id in group1_3_candidates:
                     v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                    if current_barracks + v_barracks <= target_barracks:
-                        current_added_by_ids.append(v_id)
-                        current_barracks += v_barracks
-                        add_count[v_id] += 1
-                    if current_barracks >= target_barracks:
-                        break
+                    if current_barracks + v_barracks <= effective_target_barracks:
+                        current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
+                    if current_barracks >= effective_target_barracks: break
+                if current_barracks >= effective_target_barracks: added_by_map[u_id] = current_added_by_ids; continue
+
+                g6_preferred = []; g6_others = []
+                for v_id in group6_candidates:
+                     v_packs = set(online_users_profiles[v_id].get('preferred_packs', []))
+                     if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs): g6_preferred.append(v_id)
+                     else: g6_others.append(v_id)
+                g6_preferred.sort(key=lambda v_id: add_count[v_id]); g6_others.sort(key=lambda v_id: add_count[v_id])
+                for v_id in g6_preferred + g6_others:
+                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
+                    if current_barracks + v_barracks <= effective_target_barracks:
+                        current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
+                    if current_barracks >= effective_target_barracks: break
+                if current_barracks >= effective_target_barracks: added_by_map[u_id] = current_added_by_ids; continue
+
+                other_preferred = []; other_others = []
+                for v_id in other_group_candidates:
+                     v_packs = set(online_users_profiles[v_id].get('preferred_packs', []))
+                     if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs): other_preferred.append(v_id)
+                     else: other_others.append(v_id)
+                other_preferred.sort(key=lambda v_id: add_count[v_id]); other_others.sort(key=lambda v_id: add_count[v_id])
+                for v_id in other_preferred + other_others:
+                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
+                    if current_barracks + v_barracks <= effective_target_barracks:
+                        current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
+                    if current_barracks >= effective_target_barracks: break
+
             else:
-                for v_id in preferred_matches_ids:
-                    current_added_by_ids.append(v_id)
-                    current_barracks += online_users_profiles[v_id].get('barracks', 0)
-                    add_count[v_id] += 1
+                # ** 일반 모드 또는 Group6 외 유저 **
+                preferred_matches_ids = []; other_matches_ids = []
+                all_candidates = group1_3_candidates + group6_candidates + other_group_candidates
+                for v_id in all_candidates:
+                    v_packs = set(online_users_profiles[v_id].get('preferred_packs', []))
+                    if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs): preferred_matches_ids.append(v_id)
+                    else: other_matches_ids.append(v_id)
 
-                needed_barracks = target_barracks - current_barracks
-                other_matches_ids.sort(key=lambda v_id: add_count[v_id])
-                for v_id in other_matches_ids:
-                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                    if current_barracks + v_barracks <= target_barracks:
-                       current_added_by_ids.append(v_id)
-                       current_barracks += v_barracks
-                       add_count[v_id] += 1
-                    if current_barracks >= target_barracks:
-                        break
+                preferred_barracks_sum = sum(online_users_profiles[v_id].get('barracks', 0) for v_id in preferred_matches_ids)
+                u_own_barracks = u_profile.get('barracks', 0)
+
+                if preferred_barracks_sum >= effective_target_barracks - u_own_barracks:
+                    preferred_matches_ids.sort(key=lambda v_id: add_count[v_id])
+                    for v_id in preferred_matches_ids:
+                        v_barracks = online_users_profiles[v_id].get('barracks', 0)
+                        if current_barracks + v_barracks <= effective_target_barracks:
+                            current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
+                        if current_barracks >= effective_target_barracks: break
+                else:
+                    preferred_matches_ids.sort(key=lambda v_id: add_count[v_id])
+                    for v_id in preferred_matches_ids:
+                        if current_barracks < effective_target_barracks:
+                            if v_id not in current_added_by_ids:
+                                current_added_by_ids.append(v_id)
+                                current_barracks += online_users_profiles[v_id].get('barracks', 0)
+                                add_count[v_id] += 1
+
+                    if current_barracks < effective_target_barracks:
+                        other_matches_ids.sort(key=lambda v_id: add_count[v_id])
+                        for v_id in other_matches_ids:
+                            v_barracks = online_users_profiles[v_id].get('barracks', 0)
+                            if current_barracks + v_barracks <= effective_target_barracks:
+                               if v_id not in current_added_by_ids:
+                                    current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
+                            if current_barracks >= effective_target_barracks: break
+
             added_by_map[u_id] = current_added_by_ids
 
-    # 파일 생성은 별도 함수에서 하므로 여기서는 계산된 맵만 반환
     print("--- 초기 친구 목록 계산 완료 ---")
     return added_by_map
 
@@ -733,11 +825,7 @@ async def update_friend_lists(online_users_profiles):
 def calculate_optimized_lists(current_added_by_map, online_users_profiles):
     """ (Placeholder) 현재 친구 목록을 개선하는 로직. 실제 구현 필요. """
     print("--- 친구 목록 최적화 계산 시작 (Placeholder) ---")
-    # TODO: 여기에 실제 최적화 알고리즘 구현
-    # 예: 가장 많은 친구를 추가해야 하는 유저(v_max)와 가장 적은 친구를 추가해야 하는 유저(v_min) 찾기
-    #     v_max 가 추가하는 u 중 일부를 v_min 이 추가하도록 변경 시도 (선호도, 배럭 조건 만족 시)
-    # 현재는 단순히 원본 맵을 그대로 반환 (변화 없음)
-    optimized_map = current_added_by_map.copy() # 수정하려면 복사본 사용
+    optimized_map = current_added_by_map.copy()
     print("--- 친구 목록 최적화 계산 완료 (Placeholder) ---")
     return optimized_map
 
@@ -748,13 +836,11 @@ async def optimize_and_apply_lists(initial_added_by_map, online_profiles):
          return
 
     print("--- 유휴 시간 최적화 시작 ---")
-    # 최적화 계산 수행
     optimized_map = calculate_optimized_lists(initial_added_by_map, online_profiles)
 
-    # 변경점 비교
     if optimized_map != initial_added_by_map:
         print("🔄 최적화 결과 변경점 발견! 새로운 친구 목록 적용 중...")
-        async with friend_list_lock: # 파일 쓰기 전에 락 획득
+        async with friend_list_lock:
              await generate_friend_list_files(optimized_map, online_profiles)
         print("✅ 최적화된 친구 목록 적용 완료.")
     else:
@@ -763,19 +849,12 @@ async def optimize_and_apply_lists(initial_added_by_map, online_profiles):
 
 # --- End Friend List Generation Logic ---
 
-
-# 첫 실행 플래그 (제거)
-# initial_run_complete = False
-
-# @tasks.loop(seconds=60) # tasks.loop 사용 시 아래 main의 bot.loop.create_task 불필요
 async def check_heartbeat_status():
     """주기적으로 메모리 기반 사용자 상태 확인 및 친구 목록 업데이트"""
     await bot.wait_until_ready()
     logging.info("⏳ 주기적 상태 확인 시작 대기 중 (초기 스캔 완료 후 진행)...")
-    await initial_scan_complete_event.wait() # 초기 스캔 완료까지 대기
+    await initial_scan_complete_event.wait()
     logging.info("▶️ 주기적 상태 확인 시작!")
-
-    raw_dir = "data/raw"
 
     while not bot.is_closed():
         print("\n--- 사용자 상태 확인 시작 ---")
@@ -807,7 +886,8 @@ async def check_heartbeat_status():
             display_name = user_profile.name
             code_str = user_profile.code if user_profile.code else "코드?"
             discord_mention = f"<@{user_id_str}>" if user_id_str else "ID?"
-            status_prefix = f"{display_name} ({discord_mention}, {code_str})"
+            group_str = user_profile.group_name if user_profile.group_name else "그룹?"
+            status_prefix = f"{display_name} ({discord_mention}, {code_str}, {group_str})"
             pack_select_str = user_profile.pack_select
             if isinstance(pack_select_str, list):
                 pack_select_str = ','.join(pack_select_str) if pack_select_str else "?"
@@ -815,16 +895,19 @@ async def check_heartbeat_status():
             full_status_str = f"{status_prefix} {status_suffix}"
 
             is_online = False
-            last_heartbeat_dt = None # 오프라인 상태 문자열 출력을 위해 초기화
+            last_heartbeat_dt = None
 
             if test_flag:
-                is_online = True # 테스트 모드 시 무조건 온라인
+                is_online = True
             else:
-                # 실제 하트비트 체크 로직
                 latest_heartbeat_info = heartbeat_records.get(user_name)
                 if latest_heartbeat_info and "latest_record" in latest_heartbeat_info:
                     latest_record = latest_heartbeat_info["latest_record"]
                     last_seen_iso = latest_record.get("timestamp")
+                    latest_group = latest_heartbeat_info.get("source_group")
+                    if latest_group and user_profile.group_name != latest_group:
+                        user_profile.group_name = latest_group
+
                     if last_seen_iso:
                         try:
                             ts = datetime.fromisoformat(last_seen_iso.replace('Z', '+00:00'))
@@ -834,7 +917,6 @@ async def check_heartbeat_status():
                                 is_online = True
                         except ValueError:
                              logging.warning(f"⚠️ 사용자 '{user_name}'의 잘못된 타임스탬프 형식 발견 (상태 확인 중): {last_seen_iso}")
-                             # last_heartbeat_dt 는 None 유지
 
             if is_online:
                 online_users_status.append(f"🟢 {full_status_str}")
@@ -848,13 +930,13 @@ async def check_heartbeat_status():
                          'username': display_name,
                          'barracks': user_profile.barracks,
                          'preferred_packs': pref_packs,
-                         'friend_code': user_profile.code
+                         'friend_code': user_profile.code,
+                         'group_name': user_profile.group_name,
+                         'custom_target_barracks': user_profile.custom_target_barracks # 추가
                      }
                 else:
-                     # 테스트 모드에서도 ID 없는 유저는 친구 목록 생성에서 제외
                      print(f"  경고: 온라인 사용자 '{display_name}'의 Discord ID가 없어 친구 목록 생성에서 제외됩니다.")
             else:
-                # 테스트 모드가 아닐 때만 오프라인 처리
                 last_seen_str = last_heartbeat_dt.strftime('%Y-%m-%d %H:%M:%S') if last_heartbeat_dt else "기록 없음"
                 offline_users_status.append(f"🔴 {full_status_str} [마지막: {last_seen_str}]")
 
@@ -866,21 +948,19 @@ async def check_heartbeat_status():
         print("----------------------------------------------")
 
         # --- 친구 목록 업데이트 및 최적화 로직 호출 ---
-        # 1. 기본 친구 목록 계산 (매번 실행)
         initial_map = await update_friend_lists(current_online_profiles)
 
-        # 2. 계산된 목록으로 파일 쓰기 (락 사용)
         async with friend_list_lock:
              print("기본 친구 목록 파일 생성 시도...")
              await generate_friend_list_files(initial_map, current_online_profiles)
              print("기본 친구 목록 파일 생성 완료.")
 
-        # 3. 유휴 시간 최적화 시도 (별도 함수 호출)
-        # 이 함수는 내부적으로 변경이 있을 때만 락을 잡고 파일을 씀
         await optimize_and_apply_lists(initial_map, current_online_profiles)
 
         print("--- 사용자 상태 확인 및 목록 업데이트 완료 ---")
         await asyncio.sleep(60)
+
+# ... (GP 관련 함수들 복구 - parse_godpack_message, post_gp_result, process_gp_result_message)
 
 async def parse_godpack_message(content: str) -> dict:
     """
@@ -898,149 +978,86 @@ async def parse_godpack_message(content: str) -> dict:
               tag_key: 적용할 태그의 키 (예: "1P", "2P", None)
     """
     logging.debug(f"GP 메시지 파싱 시작: {content[:100]}...")
-    inform = None # 기본적으로 본문 없음 (첨부파일만 게시 가정)
+    inform = None
     title = None
     tag_key = None
 
     try:
-        # --- 실제 파싱 로직 (제공된 예시 기반) ---
         username = None
         progress_percent = None
         player_count_tag = None
         timestamp_str = None
 
-        # 1. 사용자 이름 추출 (예: "papawolf316 (숫자)")
         user_match = re.search(r"^([\w\d_]+)\s+\(\d+\)", content, re.MULTILINE)
-        if user_match:
-            username = user_match.group(1)
+        if user_match: username = user_match.group(1)
 
-        # 2. 진행률 추출 및 계산 (예: "[4/5]")
         progress_match = re.search(r"\[(\d+)/(\d+)\]", content)
         if progress_match:
             try:
                 current, total = int(progress_match.group(1)), int(progress_match.group(2))
-                if total > 0:
-                    progress_percent = f"{int((current / total) * 100)}%"
-            except (ValueError, ZeroDivisionError):
-                logging.warning(f"진행률 계산 오류: {progress_match.group(0)}")
+                if total > 0: progress_percent = f"{int((current / total) * 100)}%"
+            except (ValueError, ZeroDivisionError): logging.warning(f"진행률 계산 오류: {progress_match.group(0)}")
 
-        # 3. 플레이어 수 태그 추출 (예: "[2P]")
-        player_count_match = re.search(r"\[(\dP)\]", content) # 1P, 2P, 3P, 4P, 5P 등
-        if player_count_match:
-            player_count_tag = player_count_match.group(1)
-            tag_key = player_count_tag # 태그 키로 사용
+        player_count_match = re.search(r"\[(\dP)\]", content)
+        if player_count_match: tag_key = player_count_match.group(1); player_count_tag = tag_key
 
-        # 4. 파일명에서 타임스탬프 추출 (예: "20250408161905")
         filename_match = re.search(r"File name: (\d{14})_", content)
         if filename_match:
             ts_digits = filename_match.group(1)
             try:
-                # datetime 객체로 변환 후 원하는 형식으로 포맷
                 dt_obj = datetime.strptime(ts_digits, '%Y%m%d%H%M%S')
-                timestamp_str = dt_obj.strftime('%Y.%m.%d %H:%M') # 예: 2025.04.08 16:19
-            except ValueError:
-                logging.warning(f"타임스탬프 변환 오류: {ts_digits}")
+                timestamp_str = dt_obj.strftime('%Y.%m.%d %H:%M')
+            except ValueError: logging.warning(f"타임스탬프 변환 오류: {ts_digits}")
 
-        # 5. 제목 조합 (모든 정보가 추출되었는지 확인)
         if username and progress_percent and player_count_tag and timestamp_str:
             title = f"{username} / {progress_percent} / {player_count_tag} / {timestamp_str}"
         else:
-            # 필수 정보 누락 시 기본 제목 또는 에러 처리
             logging.warning(f"GP 메시지 파싱 중 일부 정보 누락. 제목 생성 실패. Content: {content[:100]}...")
-            # 필요시 기본 제목 설정: title = "GP 결과 (파싱 실패)"
-            # 또는 None으로 두어 process_gp_result_message에서 처리하도록 함
-            return {'inform': None, 'title': None, 'tag_key': None} # 실패 처리
-
-        # 본문은 없으므로 inform은 None 유지
+            return {'inform': None, 'title': None, 'tag_key': None}
 
         logging.info(f"GP 메시지 파싱 결과: Title='{title}', Tag='{tag_key}'")
         return {'inform': inform, 'title': title, 'tag_key': tag_key}
 
     except Exception as e:
         logging.error(f"GP 메시지 파싱 중 오류 발생: {e}. Content: {content[:100]}...", exc_info=True)
-        return {'inform': None, 'title': None, 'tag_key': None} # 오류 시 None 반환
+        return {'inform': None, 'title': None, 'tag_key': None}
 
-async def post_gp_result(posting_channel: discord.abc.GuildChannel,
-                         attachments: list[discord.Attachment],
-                         inform: str | None, # inform이 None일 수 있음을 명시
-                         title: str,
-                         tag_key: str | None,
-                         tags_config: dict,
-                         group_name: str):
-    """
-    파싱된 GP 결과와 첨부파일을 지정된 채널에 게시하고 태그를 적용합니다.
-    inform이 None이면 첨부파일만 게시합니다.
-
-    Args:
-        posting_channel: 게시할 채널 객체
-        attachments: 메시지 첨부 파일 리스트
-        inform: 게시될 본문 내용 또는 None
-        title: (포럼 스레드용) 제목
-        tag_key: 적용할 태그 키 ("1P", "2P", 등) 또는 None
-        tags_config: 그룹의 태그 설정 딕셔너리
-        group_name: 로그용 그룹 이름
-    """
+async def post_gp_result(posting_channel: discord.abc.GuildChannel, attachments: list[discord.Attachment], inform: str | None, title: str, tag_key: str | None, tags_config: dict, group_name: str):
+    """파싱된 GP 결과와 첨부파일을 지정된 채널에 게시하고 태그를 적용합니다."""
     try:
-        # 첨부 파일 처리 (파일이 있을 때만 변환)
-        files_to_send = []
-        if attachments:
-            files_to_send = [await att.to_file() for att in attachments]
+        files_to_send = [await att.to_file() for att in attachments] if attachments else []
 
-        # inform이 None이고 첨부 파일이 있을 때 -> 파일만 전송
         if inform is None and files_to_send:
             logging.info(f"[{group_name}] 본문 없이 첨부파일({len(files_to_send)}개)만 포스팅합니다.")
             if isinstance(posting_channel, discord.ForumChannel):
                 applied_tags_list = []
-                # 1. "Yet" 태그 무조건 추가 시도
-                yet_tag_key = "Yet"
-                yet_tag_id = tags_config.get(yet_tag_key)
+                yet_tag_id = tags_config.get("Yet")
                 if yet_tag_id:
                     yet_tag = discord.utils.get(posting_channel.available_tags, id=yet_tag_id)
-                    if yet_tag:
-                        applied_tags_list.append(yet_tag)
-                        logging.info(f"[{group_name}] 기본 태그 'Yet' 적용됨.")
-                    else:
-                        logging.warning(f"[{group_name}] 설정된 'Yet' 태그(ID:{yet_tag_id})를 포럼 채널({posting_channel.name})에서 찾을 수 없습니다.")
-                else:
-                    logging.warning(f"[{group_name}] 'Yet' 태그가 tags_config에 정의되지 않았습니다.")
+                    if yet_tag: applied_tags_list.append(yet_tag); logging.info(f"[{group_name}] 기본 태그 'Yet' 적용됨.")
+                    else: logging.warning(f"[{group_name}] 'Yet' 태그(ID:{yet_tag_id}) 찾기 실패.")
+                else: logging.warning(f"[{group_name}] 'Yet' 태그 미정의.")
 
-                # 2. tag_key 기반 태그 추가 시도 (예: "1P", "2P")
                 if tag_key and tag_key in tags_config:
                     tag_id = tags_config[tag_key]
                     target_tag_object = discord.utils.get(posting_channel.available_tags, id=tag_id)
-                    if target_tag_object:
-                        # 이미 Yet 태그가 있을 수 있으므로 중복 확인 불필요 (같은 태그 객체는 한 번만 추가됨)
-                        if target_tag_object not in applied_tags_list: # 혹시 Yet과 같은 태그일 경우 대비
-                            applied_tags_list.append(target_tag_object)
-                            logging.info(f"[{group_name}] 추가 태그 '{target_tag_object.name}' (ID: {tag_id}) 적용됨.")
-                        else:
-                            logging.info(f"[{group_name}] 태그 '{target_tag_object.name}'는 이미 Yet 태그로 적용되었습니다.") # Yet과 tag_key 태그가 동일한 경우
-                    else:
-                        logging.warning(f"[{group_name}] 설정된 태그 키 '{tag_key}'(ID:{tag_id}) ... 태그 찾기 실패") # 로그 간략화
-                elif tag_key:
-                    logging.warning(f"[{group_name}] 태그 키 '{tag_key}'가 tags_config에 정의되지 않았습니다.")
+                    if target_tag_object and target_tag_object not in applied_tags_list:
+                         applied_tags_list.append(target_tag_object); logging.info(f"[{group_name}] 추가 태그 '{target_tag_object.name}' 적용됨.")
+                    elif not target_tag_object: logging.warning(f"[{group_name}] 태그 키 '{tag_key}'(ID:{tag_id}) 태그 찾기 실패.")
+                elif tag_key: logging.warning(f"[{group_name}] 태그 키 '{tag_key}' 미정의.")
 
-                # 스레드 생성 (content 없이)
-                await posting_channel.create_thread(
-                    name=title,
-                    files=files_to_send,
-                    applied_tags=applied_tags_list
-                )
-                logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 첨부파일만 포함된 스레드 생성 완료.")
+                await posting_channel.create_thread(name=title, files=files_to_send, applied_tags=applied_tags_list)
+                logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 첨부파일 스레드 생성 완료.")
 
             elif isinstance(posting_channel, discord.TextChannel):
-                # 텍스트 채널: content 없이 파일만 전송
                 await posting_channel.send(files=files_to_send)
-                logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 첨부파일만 전송 완료.")
-            else:
-                logging.warning(f"[{group_name}] 포스팅 채널 타입({type(posting_channel)}) 미지원 (첨부파일만 전송).")
+                logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 첨부파일 전송 완료.")
+            else: logging.warning(f"[{group_name}] 포스팅 채널 타입 미지원 (첨부파일만 전송).")
 
-        # inform 내용이 있을 때 -> 기존 로직대로 텍스트 + 파일 전송
         elif inform is not None:
             logging.info(f"[{group_name}] 본문과 첨부파일({len(files_to_send)}개) 포스팅합니다.")
             if isinstance(posting_channel, discord.ForumChannel):
                 applied_tags_list = []
-                # 태그 찾기 및 적용 로직 (위와 동일)
                 if tag_key and tag_key in tags_config:
                     tag_id = tags_config[tag_key]
                     target_tag_object = discord.utils.get(posting_channel.available_tags, id=tag_id)
@@ -1053,110 +1070,53 @@ async def post_gp_result(posting_channel: discord.abc.GuildChannel,
                          yet_tag = discord.utils.get(posting_channel.available_tags, id=yet_tag_id)
                          if yet_tag: applied_tags_list.append(yet_tag); logging.info("... 기본 태그 'Yet' 적용")
 
-                # 스레드 생성 (content 포함)
-                await posting_channel.create_thread(
-                    name=title,
-                    content=inform,
-                    files=files_to_send,
-                    applied_tags=applied_tags_list
-                )
+                await posting_channel.create_thread(name=title, content=inform, files=files_to_send, applied_tags=applied_tags_list)
                 logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 결과 스레드 생성 완료.")
 
             elif isinstance(posting_channel, discord.TextChannel):
-                # 텍스트 채널: content 와 파일 전송
                 await posting_channel.send(content=inform, files=files_to_send)
                 logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 결과 메시지 전송 완료.")
-            else:
-                logging.warning(f"[{group_name}] 포스팅 채널 타입({type(posting_channel)}) 미지원.")
+            else: logging.warning(f"[{group_name}] 포스팅 채널 타입 미지원.")
 
-        # inform도 None이고 첨부 파일도 없을 때
-        else:
-            logging.warning(f"[{group_name}] 포스팅할 내용(본문 또는 첨부파일)이 없습니다.")
+        else: logging.warning(f"[{group_name}] 포스팅할 내용(본문/첨부) 없음.")
 
-    except discord.Forbidden:
-        logging.error(f"[{group_name}] 포스팅 채널 '{posting_channel.name}'에 메시지/파일 작성 또는 태그 적용 권한이 없습니다.")
-    except discord.HTTPException as e:
-        logging.error(f"[{group_name}] 포스팅 중 HTTP 오류 발생: {e.status} {e.text}")
-    except Exception as e:
-        logging.error(f"[{group_name}] 포스팅 중 예상치 못한 오류 발생: {e}", exc_info=True)
+    except discord.Forbidden: logging.error(f"[{group_name}] 포스팅 채널 '{posting_channel.name}' 권한 없음.")
+    except discord.HTTPException as e: logging.error(f"[{group_name}] 포스팅 중 HTTP 오류: {e.status} {e.text}")
+    except Exception as e: logging.error(f"[{group_name}] 포스팅 중 예상치 못한 오류: {e}", exc_info=True)
 
 async def process_gp_result_message(message: discord.Message, group_config: dict):
     """GP 결과 메시지 처리 (텍스트 파싱, 포스팅, 태그 적용)"""
     group_name = group_config.get("NAME", "Unknown Group")
     content = message.content
     attachments = message.attachments
-    logging.info(f"[{group_name}-Detect] GP 결과 메시지(텍스트) 감지 (ID: {message.id}), 첨부: {len(attachments)}개")
+    logging.info(f"[{group_name}-Detect] GP 결과 메시지 감지 (ID: {message.id}), 첨부: {len(attachments)}개")
     logging.info(f"  Raw Content: {content[:200]}...")
 
-    inform = None
-    title = None
-    tag_key = None
+    inform = None; title = None; tag_key = None
 
-    # --- Poke.py 로직 적용: 키워드 확인 및 분기 ---
-    if "Invalid" in content:
-        logging.info(f"[{group_name}] 'Invalid' 키워드 감지. 처리를 건너뜁니다.")
-        return # Poke.py 처럼 Invalid는 무시
+    if "Invalid" in content: logging.info(f"[{group_name}] 'Invalid' 키워드 감지. 건너뜁니다."); return
+    elif "found by" in content: logging.info(f"[{group_name}] 'found by' 키워드 감지 (Pseudo GP)."); parsed_data = await parse_godpack_message(content)
+    elif "Valid" in content: logging.info(f"[{group_name}] 'Valid' 키워드 감지 (Valid GP)."); parsed_data = await parse_godpack_message(content)
+    else: logging.warning(f"[{group_name}] 유효 GP 키워드('Invalid', 'found by', 'Valid') 없음."); return
 
-    elif "found by" in content: # Pseudo God Pack 처리
-        logging.info(f"[{group_name}] 'found by' 키워드 감지 (Pseudo God Pack).")
-        # 메시지 파싱 (parse_godpack_message는 내부적으로 Pseudo/Normal 구분 필요)
-        parsed_data = await parse_godpack_message(content)
-        inform = parsed_data['inform']
-        title = parsed_data['title']
-        tag_key = parsed_data['tag_key'] # 파싱 함수가 결정한 태그 키
+    if parsed_data: inform = parsed_data['inform']; title = parsed_data['title']; tag_key = parsed_data['tag_key']
+    if title is None: logging.error(f"[{group_name}] 메시지 파싱 실패 (제목 없음)."); return
 
-    elif "Valid" in content: # Valid God Pack 처리
-        logging.info(f"[{group_name}] 'Valid' 키워드 감지 (Valid God Pack).")
-        # 메시지 파싱
-        parsed_data = await parse_godpack_message(content)
-        inform = parsed_data['inform']
-        title = parsed_data['title']
-        tag_key = parsed_data['tag_key']
+    posting_channel_id = group_config.get("POSTING_ID"); tags_config = group_config.get("TAGS", {})
+    if not posting_channel_id: logging.warning(f"[{group_name}] 포스팅 채널 ID 없음."); return
 
-    else:
-        logging.warning(f"[{group_name}] 메시지에서 유효한 GP 결과 키워드('Invalid', 'found by', 'Valid')를 찾지 못했습니다.")
-        return # 처리할 키워드가 없으면 종료
+    try: posting_channel = await bot.fetch_channel(posting_channel_id)
+    except discord.NotFound: logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id}) 찾기 실패."); return
+    except discord.Forbidden: logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id}) 접근 권한 없음."); return
+    except Exception as e: logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id}) 가져오기 오류: {e}", exc_info=True); return
 
-    # --- 파싱 결과 확인 및 포스팅 채널 가져오기 ---
-    if title is None: # 수정된 조건: title만 None이 아니면 진행 (inform이 None은 첨부만 올리라는 의미)
-        logging.error(f"[{group_name}] 메시지 파싱 실패. 포스팅할 제목 정보가 없습니다.")
-        return
-
-    posting_channel_id = group_config.get("POSTING_ID")
-    tags_config = group_config.get("TAGS", {})
-
-    if not posting_channel_id:
-        logging.warning(f"[{group_name}] 포스팅 채널 ID가 설정되지 않아 포스팅을 건너뜁니다.")
-        return
-
-    try:
-        posting_channel = await bot.fetch_channel(posting_channel_id)
-    except discord.NotFound:
-        logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id})을 찾을 수 없습니다.")
-        return
-    except discord.Forbidden:
-        logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id})에 접근할 권한이 없습니다.")
-        return
-    except Exception as e:
-        logging.error(f"[{group_name}] 포스팅 채널(ID: {posting_channel_id})을 가져오는 중 오류 발생: {e}", exc_info=True)
-        return
-
-    # --- 결과 게시 함수 호출 ---
-    await post_gp_result(
-        posting_channel=posting_channel,
-        attachments=attachments,
-        inform=inform,
-        title=title,
-        tag_key=tag_key,
-        tags_config=tags_config,
-        group_name=group_name
-    )
+    await post_gp_result(posting_channel=posting_channel, attachments=attachments, inform=inform, title=title, tag_key=tag_key, tags_config=tags_config, group_name=group_name)
 
 async def main():
     """메인 실행 함수"""
     try:
         async with bot:
-            bot.loop.create_task(check_heartbeat_status()) # 주기적 상태 확인 태스크 시작
+            bot.loop.create_task(check_heartbeat_status())
             await bot.start(DISCORD_TOKEN)
     except Exception as e:
         logging.critical(f"봇 실행 중 치명적인 오류 발생: {e}", exc_info=True)
@@ -1164,5 +1124,4 @@ async def main():
         logging.info("봇 종료.")
 
 if __name__ == "__main__":
-    # import traceback # 필요 시 주석 해제
     asyncio.run(main())
