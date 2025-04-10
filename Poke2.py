@@ -8,6 +8,7 @@ import shutil
 import logging # 로깅 모듈 추가
 import random # Added import
 import glob # glob 모듈 임포트 추가
+from discord import app_commands # app_commands 임포트 추가
 
 # --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
@@ -24,6 +25,11 @@ HEARTBEAT_DATA_DIR = "data/heartbeat_data" # 데이터 저장 폴더
 USER_DATA_DIR = "data/user_data" # 사용자 프로필 데이터 저장 폴더
 USER_INFO_SOURCE_URL = "os.getenv('PASTEBIN_URL')" # 사용자 정보 소스 URL
 TARGET_BARRACKS_DEFAULT = 170 # 기본 목표 배럭 정의
+
+# 오류 감지 및 알림 채널 (기존 ERROR_DETECT_CHANNEL_ID)
+GODPACK_WEBHOOK_CHANNEL_ID = os.getenv('DISCORD_GROUP6_DETECT_ID')
+BARRACKS_REDUCTION_STEP = 5 # 한 번에 줄일 목표 배럭 수
+MIN_TARGET_BARRACKS = 100 # 최소 목표 배럭 (더 이상 줄이지 않음)
 
 # --- 그룹 설정 (newGroup.py 정보 기반) ---
 GROUP_CONFIGS = [
@@ -59,6 +65,7 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True # 히스토리 조회에 필요할 수 있음
 bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot) # 명령어 트리 생성
 
 # --- 전역 변수 ---
 # 사용자별 최신 heartbeat 기록 (메모리): {user_name: {"latest_record": dict}}
@@ -90,12 +97,15 @@ class User:
         self.group_name: str | None = None # 사용자의 현재 소속 그룹 (최신 Heartbeat 기반)
         self.custom_target_barracks: int | None = None # 사용자 지정 목표 배럭
 
-    def update_from_heartbeat(self, heartbeat_data):
-        """Heartbeat 데이터로 사용자 정보 업데이트 (타임스탬프/채널 제외)"""
+    def update_from_heartbeat(self, heartbeat_data, source_group_name: str | None = None): # source_group_name 인자 추가
+        """Heartbeat 데이터 및 소스 그룹 정보로 사용자 정보 업데이트"""
         self.barracks = heartbeat_data.get('barracks', self.barracks)
         self.version = heartbeat_data.get('version', self.version)
         self.type = heartbeat_data.get('type', self.type)
         self.pack_select = heartbeat_data.get('select', self.pack_select)
+        if source_group_name:
+             # "GroupX-Heartbeat" -> "GroupX" 또는 그대로 사용
+             self.group_name = source_group_name.split('-')[0] if '-' in source_group_name else source_group_name
 
     def update_identity(self, code: str | None, discord_id: str | None):
         """코드 및 디스코드 ID 업데이트"""
@@ -388,24 +398,29 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
 
         # --- 1. Heartbeat 기록 처리 ---
         parsed_heartbeat_data = parse_heartbeat_message(message.content)
+        # 그룹 이름 추출 ("Group6-Heartbeat" -> "Group6" 또는 채널 이름 그대로)
+        simple_group_name = channel_name.split('-')[0] if '-' in channel_name else channel_name
+
         heartbeat_record_specific = {
             "timestamp": timestamp_iso,
+            "source_group": simple_group_name, # 소스 그룹 정보 추가
             **parsed_heartbeat_data
         }
 
         heartbeat_data_list = read_heartbeat_data(user_name)
 
         if any(record.get('timestamp') == timestamp_iso for record in heartbeat_data_list):
-            return False # 중복 처리 방지
+            return False
 
         heartbeat_data_list.append(heartbeat_record_specific)
         heartbeat_saved = False
         if write_heartbeat_data(user_name, heartbeat_data_list):
-            # logging.debug(f"💾 Heartbeat 기록됨 [{channel_name}]: {user_name} ...") # 너무 빈번할 수 있어 주석 처리 또는 DEBUG 레벨
-            # 메모리(heartbeat_records) 업데이트
-            heartbeat_records[user_name] = {"latest_record": heartbeat_record_specific}
+            # 메모리(heartbeat_records) 업데이트 시에도 source_group 포함
+            heartbeat_records[user_name] = {
+                "latest_record": heartbeat_record_specific,
+                 # "source_group": simple_group_name # 최신 그룹 정보 저장 (check_heartbeat_status에서 사용) - heartbeat_records 로딩 시 처리되므로 중복 저장 불필요
+            }
             heartbeat_saved = True
-        # else: 실패 로그는 write_heartbeat_data 에서 출력
 
         # --- 2. User 프로필 업데이트 ---
         user_profile = user_profiles.get(user_name)
@@ -415,14 +430,13 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
                 user_profile = User(user_name)
                 logging.info(f"✨ 신규 사용자 프로필 생성: {user_name}")
 
-        # Heartbeat 데이터로 User 객체 업데이트
-        user_profile.update_from_heartbeat(parsed_heartbeat_data)
+        # Heartbeat 데이터와 그룹 정보로 User 객체 업데이트
+        user_profile.update_from_heartbeat(parsed_heartbeat_data, simple_group_name) # simple_group_name 전달
 
-        # 업데이트된 User 객체를 메모리 및 파일에 저장
         user_profiles[user_name] = user_profile
-        write_user_profile(user_profile) # 저장 실패 시 함수 내에서 로그 출력
+        write_user_profile(user_profile)
 
-        return heartbeat_saved # Heartbeat 저장 성공 여부 반환
+        return heartbeat_saved
 
     except Exception as e:
         logging.error(f"❌ [{channel_name}] Heartbeat 처리 중 예외 발생: {e} | 사용자: {user_name} | 메시지: {message.content[:100]}...", exc_info=True)
@@ -433,8 +447,26 @@ async def process_heartbeat_message(message, channel_id_str, channel_name):
 async def on_ready():
     """봇 준비 완료 시 실행"""
     logging.info(f'✅ 로그인됨: {bot.user}')
-    logging.info("--- 초기화 시작 ---")
 
+    # --- 명령어 트리 동기화 ---
+    YOUR_TEST_SERVER_ID = os.getenv('DISCORD_SERVER_ID') # << 중요: 실제 테스트 서버 ID로 변경하세요!
+    test_guild = discord.Object(id=YOUR_TEST_SERVER_ID)
+    try:
+        # 1. 전역 동기화 시도 (시간이 걸릴 수 있음)
+        # synced_global = await tree.sync()
+        # logging.info(f"🌳 전역 슬래시 명령어 {len(synced_global)}개 동기화 시도 완료.")
+
+        # 2. 테스트 서버에 즉시 동기화 (빠른 확인용)
+        # 전역 동기화 대신 또는 추가로 사용할 수 있습니다.
+        # 전역 대신 길드 동기화만 사용하면 다른 서버에서는 명령어가 보이지 않습니다.
+        await tree.sync(guild=test_guild)
+        logging.info(f"🌳 테스트 서버({YOUR_TEST_SERVER_ID})에 슬래시 명령어 동기화 완료.")
+
+    except Exception as e:
+        logging.error(f"❌ 슬래시 명령어 동기화 실패: {e}", exc_info=True)
+    # --- 명령어 트리 동기화 끝 ---
+
+    logging.info("--- 초기화 시작 ---")
     global heartbeat_records, user_profiles
     load_all_data(HEARTBEAT_DATA_DIR, "Heartbeat", read_heartbeat_data, heartbeat_records)
     load_all_data(USER_DATA_DIR, "사용자 프로필", read_user_profile, user_profiles)
@@ -531,13 +563,75 @@ async def on_ready():
     initial_scan_complete_event.set()
     logging.info("🏁 초기 스캔 완료 이벤트 설정됨. 주기적 상태 확인 시작 가능.")
 
+    logging.info(f'👂 오류 감지 및 알림 채널: {GODPACK_WEBHOOK_CHANNEL_ID}') # 이름 변경 및 로그 수정
+
 @bot.event
 async def on_message(message):
     """메시지 수신 시 실시간 처리"""
     if message.author == bot.user: return # 봇 메시지 무시
 
     channel_id = message.channel.id
+    content = message.content
 
+    # --- 목표 배럭 자동 감소 로직 ---
+    if channel_id == GODPACK_WEBHOOK_CHANNEL_ID and "Instance Main has been stuck at Add" in content:
+        logging.info(f"[{GODPACK_WEBHOOK_CHANNEL_ID}] 목표 배럭 초과 오류 감지됨.")
+        discord_id_match = re.search(r"<@(\d+)>", content)
+        if discord_id_match:
+            discord_id_str = discord_id_match.group(1)
+            logging.info(f"  - 대상 Discord ID 추출: {discord_id_str}")
+
+            target_user_profile: User | None = None
+            target_user_name = "Unknown User"
+
+            for user_name, profile in user_profiles.items():
+                if profile.discord_id == discord_id_str:
+                    target_user_profile = profile
+                    target_user_name = user_name
+                    break
+
+            if target_user_profile:
+                logging.info(f"  - 사용자 프로필 찾음: {target_user_name}")
+                current_target = target_user_profile.custom_target_barracks
+                effective_current_target = current_target if current_target is not None else TARGET_BARRACKS_DEFAULT
+                new_target_barracks = max(MIN_TARGET_BARRACKS, effective_current_target - BARRACKS_REDUCTION_STEP)
+
+                if new_target_barracks < effective_current_target:
+                    logging.info(f"  - 목표 배럭 변경 시도: {effective_current_target} -> {new_target_barracks}")
+                    target_user_profile.custom_target_barracks = new_target_barracks
+
+                    if write_user_profile(target_user_profile):
+                        logging.info(f"  - 사용자 '{target_user_name}' 프로필 업데이트 성공.")
+                        # 알림 메시지 전송 (test_flag 확인)
+                        if not test_flag:
+                            try:
+                                alert_channel = message.channel
+                                alert_message = (
+                                    f"⚠️ 사용자 **{target_user_name}** (<@{discord_id_str}>)의 목표 배럭이 자동으로 조정되었습니다. (테스트)\n"
+                                    f"- 이전 목표: `{effective_current_target}`\n"
+                                    f"- 새 목표: `{new_target_barracks}`\n"
+                                    f"- 사유: 친구 추가 중 인스턴스 오류 발생 감지"
+                                )
+                                await alert_channel.send(alert_message)
+                                logging.info(f"  - 알림 메시지 전송 완료 (채널: {alert_channel.id}).")
+                            except discord.Forbidden:
+                                logging.error(f"❌ 알림 채널({alert_channel.id})에 메시지를 보낼 권한이 없습니다.")
+                            except Exception as e:
+                                logging.error(f"❌ 알림 채널 메시지 전송 중 오류 발생: {e}", exc_info=True)
+                        else:
+                            logging.info(f"  - [Test Mode] 목표 배럭 조정 알림 메시지 전송 건너뜀.")
+                    else:
+                        logging.error(f"  - 사용자 '{target_user_name}' 프로필 업데이트 실패.")
+                else:
+                    logging.info(f"  - 목표 배럭이 이미 최소값({MIN_TARGET_BARRACKS}) 이하이거나 같으므로 변경하지 않음 (현재: {effective_current_target}).")
+            else:
+                logging.warning(f"  - Discord ID '{discord_id_str}'에 해당하는 사용자를 찾을 수 없습니다.")
+            return
+        else:
+            logging.warning(f"  - 오류 메시지에서 Discord ID를 추출하지 못했습니다.")
+            return
+
+    # --- 기존 채널 확인 로직 ---
     # 모든 그룹 설정을 순회하며 해당 채널이 어떤 그룹의 어떤 채널인지 확인
     for config in GROUP_CONFIGS:
         group_name = config.get("NAME", "Unnamed Group")
@@ -1122,6 +1216,89 @@ async def main():
         logging.critical(f"봇 실행 중 치명적인 오류 발생: {e}", exc_info=True)
     finally:
         logging.info("봇 종료.")
+
+# --- 슬래시 명령어 정의 ---
+
+@tree.command(name="내정보", description="내 프로필 정보를 확인합니다.")
+async def my_profile_info(interaction: discord.Interaction):
+    """사용자 본인의 프로필 정보를 보여주는 슬래시 명령어"""
+    user_id_str = str(interaction.user.id)
+    target_user_profile: User | None = None
+    target_user_name = "Unknown"
+
+    # 메모리에서 사용자 찾기
+    for user_name, profile in user_profiles.items():
+        if profile.discord_id == user_id_str:
+            target_user_profile = profile
+            target_user_name = user_name
+            break
+
+    if target_user_profile:
+        logging.info(f"Slash Command: /myinfo by {interaction.user.name} ({user_id_str}) - 사용자 찾음: {target_user_name}") # 명령어 이름 로그 수정
+        # Embed 사용하여 깔끔하게 표시 (선택 사항)
+        embed = discord.Embed(title=f"{target_user_name}님의 프로필 정보", color=discord.Color.blue())
+        embed.add_field(name="Discord ID", value=target_user_profile.discord_id or "N/A", inline=False)
+        embed.add_field(name="친구 코드", value=target_user_profile.code or "N/A", inline=False)
+        embed.add_field(name="배럭 수", value=str(target_user_profile.barracks), inline=True)
+        # custom_target_barracks 표시 (None이면 기본값 사용 문구 표시)
+        if target_user_profile.custom_target_barracks is not None:
+            target_display = f"{target_user_profile.custom_target_barracks}"
+        else:
+            target_display = f"설정 안됨 (기본값 {TARGET_BARRACKS_DEFAULT} 사용)"
+        embed.add_field(name="목표 배럭", value=target_display, inline=True)
+        embed.add_field(name="그룹", value=target_user_profile.group_name or "N/A", inline=True)
+        embed.add_field(name="버전", value=target_user_profile.version, inline=True)
+        embed.add_field(name="타입", value=target_user_profile.type, inline=True)
+        embed.add_field(name="선호 팩", value=target_user_profile.pack_select or "N/A", inline=True)
+        embed.set_footer(text="이 메시지는 당신에게만 보입니다.")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        logging.warning(f"Slash Command: /myinfo by {interaction.user.name} ({user_id_str}) - 사용자 데이터 없음") # 명령어 이름 로그 수정
+        await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
+
+@tree.command(name="목표배럭설정", description="내 목표 배럭 수를 설정합니다.")
+@app_commands.describe(barracks="설정할 목표 배럭 수 (예: 160)")
+async def set_target_barracks(interaction: discord.Interaction, barracks: int):
+    """사용자 본인의 custom_target_barracks 값을 수정하는 슬래시 명령어"""
+    user_id_str = str(interaction.user.id)
+    target_user_profile: User | None = None
+    target_user_name = "Unknown"
+
+    # 입력값 기본 검증 (0 이하 또는 너무 큰 값 방지 - 예: 500 초과)
+    if barracks <= 0 or barracks > 500:
+        await interaction.response.send_message(f"목표 배럭 수는 1 이상 500 이하의 값이어야 합니다.", ephemeral=True)
+        return
+
+    # 메모리에서 사용자 찾기
+    for user_name, profile in user_profiles.items():
+        if profile.discord_id == user_id_str:
+            target_user_profile = profile
+            target_user_name = user_name
+            break
+
+    if target_user_profile:
+        logging.info(f"Slash Command: /목표배럭설정 by {interaction.user.name} ({user_id_str}) - 사용자: {target_user_name}, 요청 값: {barracks}")
+        old_value = target_user_profile.custom_target_barracks
+        effective_old_value = old_value if old_value is not None else TARGET_BARRACKS_DEFAULT
+
+        target_user_profile.custom_target_barracks = barracks
+
+        # 파일 저장 시도
+        if write_user_profile(target_user_profile):
+            logging.info(f"  - 사용자 '{target_user_name}' 프로필 업데이트 성공.")
+            # ephemeral=True 제거 및 사용자 멘션 추가
+            await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 목표 배럭 수가 `{effective_old_value}`에서 `{barracks}`(으)로 성공적으로 변경되었습니다.")
+        else:
+            logging.error(f"  - 사용자 '{target_user_name}' 프로필 업데이트 실패.")
+            # 실패 시 메모리 값 롤백 (선택 사항)
+            target_user_profile.custom_target_barracks = old_value
+            # ephemeral=True 제거 및 사용자 멘션 추가
+            await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 목표 배럭 수를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.")
+    else:
+        # 프로필 못찾은 에러는 계속 ephemeral 유지
+        logging.warning(f"Slash Command: /setbarracks by {interaction.user.name} ({user_id_str}) - 사용자 데이터 없음") # 명령어 이름 로그 수정
+        await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없어 목표 배럭을 설정할 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
