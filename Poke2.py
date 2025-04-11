@@ -34,11 +34,49 @@ MIN_TARGET_BARRACKS = 100 # 최소 목표 배럭 (더 이상 줄이지 않음)
 # --- 그룹 설정 (newGroup.py 정보 기반) ---
 GROUP_CONFIGS = [
     {
+        "NAME": "Group1",
+        "HEARTBEAT_ID": os.getenv('DISCORD_GROUP1_HEARTBEAT_ID'),
+        "DETECT_ID": os.getenv('DISCORD_GROUP1_DETECT_ID'),
+        "POSTING_ID": os.getenv('DISCORD_GROUP1_POSTING_ID'),
+        "COMMAND_ID": os.getenv('DISCORD_GROUP1_COMMAND_ID'),
+        "MUSEUM_ID": os.getenv('DISCORD_GROUP1_MUSEUM_ID'),
+        "TAGS": {
+            "Yet": os.getenv('DISCORD_GROUP1_TAG_YET'),
+            "Good": os.getenv('DISCORD_GROUP1_TAG_GOOD'),
+            "Bad": os.getenv('DISCORD_GROUP1_TAG_BAD'),
+            "1P": os.getenv('DISCORD_GROUP1_TAG_1P'),
+            "2P": os.getenv('DISCORD_GROUP1_TAG_2P'),
+            "3P": os.getenv('DISCORD_GROUP1_TAG_3P'),
+            "4P": os.getenv('DISCORD_GROUP1_TAG_4P'),
+            "5P": os.getenv('DISCORD_GROUP1_TAG_5P'),
+            "Notice": os.getenv('DISCORD_GROUP1_TAG_NOTICE')
+        }
+    },
+    {
+        "NAME": "Group3",
+        "HEARTBEAT_ID": os.getenv('DISCORD_GROUP3_HEARTBEAT_ID'),
+        "DETECT_ID": os.getenv('DISCORD_GROUP3_DETECT_ID'),
+        "POSTING_ID": os.getenv('DISCORD_GROUP3_POSTING_ID'),
+        "COMMAND_ID": os.getenv('DISCORD_GROUP3_COMMAND_ID'),
+        "MUSEUM_ID": os.getenv('DISCORD_GROUP3_MUSEUM_ID'),
+        "TAGS": {
+            "Yet": os.getenv('DISCORD_GROUP3_TAG_YET'),
+            "Good": os.getenv('DISCORD_GROUP3_TAG_GOOD'),
+            "Bad": os.getenv('DISCORD_GROUP3_TAG_BAD'),
+            "1P": os.getenv('DISCORD_GROUP3_TAG_1P'),
+            "2P": os.getenv('DISCORD_GROUP3_TAG_2P'),
+            "3P": os.getenv('DISCORD_GROUP3_TAG_3P'),
+            "4P": os.getenv('DISCORD_GROUP3_TAG_4P'),
+            "5P": os.getenv('DISCORD_GROUP3_TAG_5P'),
+            "Notice": os.getenv('DISCORD_GROUP3_TAG_NOTICE')
+        }
+    },
+    {
         "NAME": "Group6",
         "HEARTBEAT_ID": os.getenv('DISCORD_GROUP6_HEARTBEAT_ID'), # Heartbeat (예시, 실제 그룹 ID에 맞게 조정 필요)
         "DETECT_ID": os.getenv('DISCORD_GROUP6_DETECT_ID'), # GP webhook
         "POSTING_ID": os.getenv('DISCORD_GROUP6_POSTING_ID'),
-        "COMMAND_ID": 1356656481180848195,
+        "COMMAND_ID": 1356656481180848195, # Group6 COMMAND_ID 추가 (Poke3.py에 없음, Poke2.py 값 유지)
         "MUSEUM_ID": os.getenv('DISCORD_GROUP6_MUSEUM_ID'),
         "TAGS": {
             "Yet": os.getenv('DISCORD_GROUP6_TAG_YET'),
@@ -570,11 +608,71 @@ async def on_message(message):
     """메시지 수신 시 실시간 처리"""
     if message.author == bot.user: return # 봇 메시지 무시
 
+    # --- 스레드 댓글 감지 및 목표 배럭 초기화 로직 ---
+    if isinstance(message.channel, discord.Thread):
+        # 이 스레드가 어떤 그룹의 포스팅 채널에 속하는지 확인
+        thread_parent_id = message.channel.parent_id
+        target_group_config = None
+        for config in GROUP_CONFIGS:
+            if config.get("POSTING_ID") == thread_parent_id:
+                target_group_config = config
+                break
+
+        if target_group_config:
+            logging.info(f"[{target_group_config['NAME']}-Posting] 스레드 댓글 감지 (작성자: {message.author.name}, ID: {message.author.id})")
+            author_id_str = str(message.author.id)
+            target_user_profile: User | None = None
+            target_user_name = "Unknown"
+
+            # 메모리에서 사용자 찾기
+            for user_name, profile in user_profiles.items():
+                if profile.discord_id == author_id_str:
+                    target_user_profile = profile
+                    target_user_name = user_name
+                    break
+
+            if target_user_profile:
+                current_custom_target = target_user_profile.custom_target_barracks
+                reset_value = 170 # 복구할 목표 배럭 값
+
+                # 현재 설정값이 있고, 170 미만인 경우에만 복구 실행
+                if current_custom_target is not None and current_custom_target < reset_value:
+                    original_value_for_log = current_custom_target # Store original value for logging/message
+                    logging.info(f"  - 사용자 '{target_user_name}'의 목표 배럭 복구 시도 (현재값: {original_value_for_log} -> {reset_value})")
+                    target_user_profile.custom_target_barracks = reset_value
+                    if write_user_profile(target_user_profile):
+                        logging.info(f"  - 사용자 '{target_user_name}' 프로필 업데이트 성공 (목표 배럭 {reset_value}(으)로 복구됨).")
+                        try:
+                            # ephemeral=True 를 사용하여 본인에게만 보이도록 알림 전송 (실제로 변경된 경우에만)
+                            await message.reply(f"✅ {message.author.mention}, 이 스레드에 댓글을 작성하여 목표 배럭이 `{original_value_for_log}`에서 `{reset_value}`(으)로 복구되었습니다.", ephemeral=True, delete_after=60) # 60초 후 자동 삭제
+                            logging.info(f"  - 목표 배럭 복구 알림 메시지 전송 완료 (대상: {message.author.name}).")
+                        except discord.Forbidden:
+                            logging.error(f"❌ 스레드 댓글 알림 메시지 전송 권한이 없습니다 (채널: {message.channel.id}).")
+                        except Exception as e:
+                            logging.error(f"❌ 스레드 댓글 알림 메시지 전송 중 오류 발생: {e}", exc_info=True)
+                    else:
+                        # 복구 실패 시 값 롤백
+                        target_user_profile.custom_target_barracks = original_value_for_log
+                        logging.error(f"  - 사용자 '{target_user_name}' 프로필 업데이트 실패 (목표 배럭 복구 실패).")
+                        # 실패 시 알림 (선택 사항)
+                        # await message.reply(f"❌ {message.author.mention}, 목표 배럭 복구 중 오류 발생.", ephemeral=True, delete_after=10)
+                # else: # 복구 조건에 맞지 않으면 로그만 남기거나 아무것도 안 함
+                    # if current_custom_target is None:
+                    #     logging.info(f"  - 사용자 '{target_user_name}'의 목표 배럭이 설정되지 않아 복구 대상 아님.")
+                    # elif current_custom_target >= reset_value:
+                    #     logging.info(f"  - 사용자 '{target_user_name}'의 목표 배럭({current_custom_target})이 {reset_value} 이상이므로 복구 대상 아님.")
+
+            else:
+                logging.warning(f"  - 스레드 댓글 작성자(ID: {author_id_str})의 프로필 정보를 찾을 수 없습니다.")
+
+            return # 스레드 댓글 처리가 완료되었으므로 함수 종료 (다른 on_message 로직 방지)
+    # --- 스레드 댓글 감지 로직 끝 ---
+
     channel_id = message.channel.id
     content = message.content
 
     # --- 목표 배럭 자동 감소 로직 ---
-    if channel_id == GODPACK_WEBHOOK_CHANNEL_ID and "Instance Main has been stuck at Add" in content:
+    if channel_id == GODPACK_WEBHOOK_CHANNEL_ID and "Instance Main has been stuck" in content:
         logging.info(f"[{GODPACK_WEBHOOK_CHANNEL_ID}] 목표 배럭 초과 오류 감지됨.")
         discord_id_match = re.search(r"<@(\d+)>", content)
         if discord_id_match:
@@ -606,7 +704,7 @@ async def on_message(message):
                         if not test_flag:
                             try:
                                 alert_channel = message.channel
-                                alert_message = f"⚠️ 사용자 **{target_user_name}**(<@{discord_id_str}>) 목표 배럭 자동 조정: `{effective_current_target}` -> `{new_target_barracks}` (오류 감지)"
+                                alert_message = f"⚠️ 사용자 **{target_user_name}**(<@{discord_id_str}>) 목표 배럭 자동 조정: `{effective_current_target}` -> `{new_target_barracks}` (/목표배럭설정 명령어로 재설정가능)"
                                 await alert_channel.send(alert_message)
                                 logging.info(f"  - 알림 메시지 전송 완료 (채널: {alert_channel.id}).")
                             except discord.Forbidden:
@@ -714,10 +812,11 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
             u_barracks = u_profile_info.get('barracks', '?')
             u_packs_list = u_profile_info.get('preferred_packs', [])
             u_packs_str = ",".join(u_packs_list) if u_packs_list else "?"
-            lines_for_added_by_file.append(f"My Info: Username: {display_name_u} / Barracks: {u_barracks} / Packs: {u_packs_str}")
+            u_group_name = u_profile_info.get('group_name', '?') # 내 그룹 정보 가져오기
+            lines_for_added_by_file.append(f"My Info: Username: {display_name_u} / Group: {u_group_name} / Barracks: {u_barracks} / Packs: {u_packs_str}") # 내 정보에도 그룹 표시
             lines_for_added_by_file.append("")
-            lines_for_added_by_file.append("Friend Code\tUsername\tBarracks\tPacks")
-            lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
+            lines_for_added_by_file.append("Friend Code\tUsername\tGroup\tBarracks\tPacks") # 헤더에 Group 추가
+            lines_for_added_by_file.append("-----------	--------	-----	--------	-----") # 구분선 수정
 
             # 자기 자신을 제외하는 필터링 제거 - added_by_user_ids 리스트를 직접 사용
             # actual_friends_added = [v_id for v_id in added_by_user_ids if v_id != u_id_str]
@@ -729,14 +828,15 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
 
                 v_friend_code = v_profile_info.get('friend_code', '코드없음')
                 v_username = v_profile_info.get('username', v_id_str)
+                v_group_name = v_profile_info.get('group_name', '?') # 친구 그룹 정보 가져오기
                 v_barracks = v_profile_info.get('barracks', 0)
                 v_packs_list = v_profile_info.get('preferred_packs', [])
                 v_packs_str = ",".join(v_packs_list) if v_packs_list else "?"
-                line = f"{v_friend_code}\t{v_username}\t{v_barracks}\t{v_packs_str}"
+                line = f"{v_friend_code}\t{v_username}\t{v_group_name}\t{v_barracks}\t{v_packs_str}" # 라인에 그룹 정보 추가
                 lines_for_added_by_file.append(line)
                 total_barracks_for_u += v_barracks # 본인 배럭도 합산됨
 
-            lines_for_added_by_file.append("-----------\t--------\t--------\t-----")
+            lines_for_added_by_file.append("-----------	--------	-----	--------	-----") # 구분선 수정
             lines_for_added_by_file.append(f"Total Added Friend Barracks:\t{total_barracks_for_u}")
 
             try:
@@ -746,11 +846,13 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
             u_friend_code = u_profile_info.get('friend_code')
             if not u_friend_code: continue
 
-            # 친구 추가 목록 생성 시에도 원본 리스트 사용 (여기서는 이미 actual_friends_added를 사용하지 않음)
+            # u_id_str을 추가한 사용자 목록(added_by_user_ids)을 순회
             for v_id_str in added_by_user_ids: # 명확성을 위해 원본 리스트 사용 명시 (기존 로직상 큰 변경은 없을 수 있음)
-                if v_id_str != u_id_str: # 다른 사용자에게만 내 코드를 추가해야 함
-                    if v_id_str in add_list:
-                       add_list[v_id_str].append(u_friend_code)
+                # v_id_str (추가한 사람)의 추가 목록(add_list)에
+                # u_id_str (추가된 사람)의 코드를 추가합니다.
+                # 자기 자신(v_id_str == u_id_str)의 코드도 포함됩니다.
+                if v_id_str in add_list: # v_id가 add_list에 있는지 확인은 여전히 필요
+                   add_list[v_id_str].append(u_friend_code)
 
         for v_id_str, friend_codes_to_add in add_list.items():
              v_profile_info = user_profiles_for_gen.get(v_id_str)
@@ -825,89 +927,101 @@ async def update_friend_lists(online_users_profiles):
             current_added_by_ids = [u_id]
 
             # --- 친구 후보 분류 ---
-            group1_3_candidates = []
+            group1_candidates = []
+            group3_candidates = []
             group6_candidates = []
             other_group_candidates = []
             for v_id in online_user_ids:
                 if u_id == v_id: continue
                 v_profile = online_users_profiles[v_id]
                 v_group = v_profile.get('group_name')
-                if v_group == "Group1" or v_group == "Group3": group1_3_candidates.append(v_id)
+                if v_group == "Group1": group1_candidates.append(v_id)
+                elif v_group == "Group3": group3_candidates.append(v_id)
                 elif v_group == "Group6": group6_candidates.append(v_id)
                 else: other_group_candidates.append(v_id)
 
             # --- 친구 선택 로직 (effective_target_barracks 사용) ---
+
+            # Helper function to add friends from a list, prioritizing packs and add_count
+            def add_friends_from_candidates(candidates, u_pref_packs, current_barracks, effective_target, current_added_ids, add_cnt, profiles):
+                new_barracks = current_barracks
+                # Process candidates only if the target isn't already met
+                if new_barracks >= effective_target:
+                    return new_barracks, current_added_ids
+
+                preferred = []
+                others = []
+                for v_id in candidates:
+                     # Ensure user exists in profiles before accessing packs
+                     if v_id in profiles:
+                         v_packs = set(profiles[v_id].get('preferred_packs', []))
+                         if u_pref_packs and not u_pref_packs.isdisjoint(v_packs):
+                             preferred.append(v_id)
+                         else:
+                             others.append(v_id)
+                     else:
+                         # Handle case where v_id might not be in profiles (though unlikely with current logic)
+                         print(f"경고: add_friends_from_candidates에서 프로필을 찾을 수 없음: {v_id}")
+                         others.append(v_id) # Add to others to be safe
+
+                preferred.sort(key=lambda v_id: add_cnt.get(v_id, 0)) # Use .get for safety
+                others.sort(key=lambda v_id: add_cnt.get(v_id, 0))
+
+                for v_id in preferred + others:
+                    if new_barracks >= effective_target: break
+                    if v_id not in current_added_ids: # Avoid re-adding
+                        # Ensure user exists in profiles before accessing barracks
+                        if v_id in profiles:
+                            v_barracks = profiles[v_id].get('barracks', 0)
+                            if new_barracks + v_barracks <= effective_target:
+                                current_added_ids.append(v_id)
+                                new_barracks += v_barracks
+                                add_cnt[v_id] = add_cnt.get(v_id, 0) + 1 # Use .get for safety
+                        else:
+                             print(f"경고: 친구 추가 중 프로필 찾을 수 없음: {v_id}")
+
+                return new_barracks, current_added_ids
+
             if migration_flag and u_group == "Group6":
                 # ** 마이그레이션 모드 & Group6 유저 **
-                group1_3_candidates.sort(key=lambda v_id: add_count[v_id])
-                for v_id in group1_3_candidates:
-                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                    if current_barracks + v_barracks <= effective_target_barracks:
-                        current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
-                    if current_barracks >= effective_target_barracks: break
-                if current_barracks >= effective_target_barracks: added_by_map[u_id] = current_added_by_ids; continue
+                group1_3_combined = group1_candidates + group3_candidates # Combine G1 and G3
+                current_barracks, current_added_by_ids = add_friends_from_candidates(
+                    group1_3_combined, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                )
+                if current_barracks < effective_target_barracks:
+                     current_barracks, current_added_by_ids = add_friends_from_candidates(
+                         group6_candidates, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                     )
+                if current_barracks < effective_target_barracks:
+                     current_barracks, current_added_by_ids = add_friends_from_candidates(
+                         other_group_candidates, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                     )
 
-                g6_preferred = []; g6_others = []
-                for v_id in group6_candidates:
-                     v_packs = set(online_users_profiles[v_id].get('preferred_packs', []))
-                     if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs): g6_preferred.append(v_id)
-                     else: g6_others.append(v_id)
-                g6_preferred.sort(key=lambda v_id: add_count[v_id]); g6_others.sort(key=lambda v_id: add_count[v_id])
-                for v_id in g6_preferred + g6_others:
-                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                    if current_barracks + v_barracks <= effective_target_barracks:
-                        current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
-                    if current_barracks >= effective_target_barracks: break
-                if current_barracks >= effective_target_barracks: added_by_map[u_id] = current_added_by_ids; continue
+            elif u_group == "Group1":
+                 # ** Group1 유저 우선순위 **
+                 priority_order = [group1_candidates, group3_candidates, group6_candidates, other_group_candidates]
+                 for candidate_list in priority_order:
+                     if current_barracks >= effective_target_barracks: break
+                     current_barracks, current_added_by_ids = add_friends_from_candidates(
+                         candidate_list, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                     )
 
-                other_preferred = []; other_others = []
-                for v_id in other_group_candidates:
-                     v_packs = set(online_users_profiles[v_id].get('preferred_packs', []))
-                     if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs): other_preferred.append(v_id)
-                     else: other_others.append(v_id)
-                other_preferred.sort(key=lambda v_id: add_count[v_id]); other_others.sort(key=lambda v_id: add_count[v_id])
-                for v_id in other_preferred + other_others:
-                    v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                    if current_barracks + v_barracks <= effective_target_barracks:
-                        current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
-                    if current_barracks >= effective_target_barracks: break
+            elif u_group == "Group3":
+                 # ** Group3 유저 우선순위 **
+                 priority_order = [group3_candidates, group1_candidates, group6_candidates, other_group_candidates]
+                 for candidate_list in priority_order:
+                     if current_barracks >= effective_target_barracks: break
+                     current_barracks, current_added_by_ids = add_friends_from_candidates(
+                         candidate_list, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                     )
 
             else:
-                # ** 일반 모드 또는 Group6 외 유저 **
-                preferred_matches_ids = []; other_matches_ids = []
-                all_candidates = group1_3_candidates + group6_candidates + other_group_candidates
-                for v_id in all_candidates:
-                    v_packs = set(online_users_profiles[v_id].get('preferred_packs', []))
-                    if u_preferred_packs and not u_preferred_packs.isdisjoint(v_packs): preferred_matches_ids.append(v_id)
-                    else: other_matches_ids.append(v_id)
-
-                preferred_barracks_sum = sum(online_users_profiles[v_id].get('barracks', 0) for v_id in preferred_matches_ids)
-                u_own_barracks = u_profile.get('barracks', 0)
-
-                if preferred_barracks_sum >= effective_target_barracks - u_own_barracks:
-                    preferred_matches_ids.sort(key=lambda v_id: add_count[v_id])
-                    for v_id in preferred_matches_ids:
-                        v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                        if current_barracks + v_barracks <= effective_target_barracks:
-                            current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
-                        if current_barracks >= effective_target_barracks: break
-                else:
-                    preferred_matches_ids.sort(key=lambda v_id: add_count[v_id])
-                    for v_id in preferred_matches_ids:
-                        if current_barracks < effective_target_barracks:
-                            if v_id not in current_added_by_ids:
-                                current_added_by_ids.append(v_id)
-                                current_barracks += online_users_profiles[v_id].get('barracks', 0)
-                                add_count[v_id] += 1
-
-                    if current_barracks < effective_target_barracks:
-                        other_matches_ids.sort(key=lambda v_id: add_count[v_id])
-                        for v_id in other_matches_ids:
-                            v_barracks = online_users_profiles[v_id].get('barracks', 0)
-                            if current_barracks + v_barracks <= effective_target_barracks:
-                               if v_id not in current_added_by_ids:
-                                    current_added_by_ids.append(v_id); current_barracks += v_barracks; add_count[v_id] += 1
-                            if current_barracks >= effective_target_barracks: break
+                # ** 일반 모드, Group6(non-migration), 기타 그룹 **
+                # 모든 후보 그룹을 합쳐서 팩 우선순위로 처리
+                all_candidates_combined = group1_candidates + group3_candidates + group6_candidates + other_group_candidates
+                current_barracks, current_added_by_ids = add_friends_from_candidates(
+                   all_candidates_combined, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                )
 
             added_by_map[u_id] = current_added_by_ids
 
@@ -1245,7 +1359,21 @@ async def my_profile_info(interaction: discord.Interaction):
         else:
             target_display = f"설정 안됨 (기본값 {TARGET_BARRACKS_DEFAULT} 사용)"
         embed.add_field(name="목표 배럭", value=target_display, inline=True)
-        embed.add_field(name="그룹", value=target_user_profile.group_name or "N/A", inline=True)
+
+        # --- 그룹 이름 매핑 ---
+        group_name = target_user_profile.group_name
+        display_group_name = "N/A" # 기본값
+        if group_name == "Group1":
+            display_group_name = "샤이닝"
+        elif group_name == "Group3":
+            display_group_name = "모든팩"
+        elif group_name == "Group6":
+            display_group_name = "PTCGPBKor"
+        elif group_name: # 정의되지 않은 다른 그룹 이름이 있는 경우
+            display_group_name = group_name
+        # --- 그룹 이름 매핑 끝 ---
+
+        embed.add_field(name="그룹", value=display_group_name, inline=True) # 매핑된 이름 사용
         embed.add_field(name="버전", value=target_user_profile.version, inline=True)
         embed.add_field(name="타입", value=target_user_profile.type, inline=True)
         embed.add_field(name="선호 팩", value=target_user_profile.pack_select or "N/A", inline=True)
@@ -1286,14 +1414,14 @@ async def set_target_barracks(interaction: discord.Interaction, barracks: int):
         # 파일 저장 시도
         if write_user_profile(target_user_profile):
             logging.info(f"  - 사용자 '{target_user_name}' 프로필 업데이트 성공.")
-            # ephemeral=True 제거 및 사용자 멘션 추가
-            await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 목표 배럭 수가 `{effective_old_value}`에서 `{barracks}`(으)로 성공적으로 변경되었습니다.")
+            # ephemeral=True 추가하여 본인에게만 보이도록 변경
+            await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 목표 배럭 수가 `{effective_old_value}`에서 `{barracks}`(으)로 성공적으로 변경되었습니다.", ephemeral=True)
         else:
             logging.error(f"  - 사용자 '{target_user_name}' 프로필 업데이트 실패.")
             # 실패 시 메모리 값 롤백 (선택 사항)
             target_user_profile.custom_target_barracks = old_value
-            # ephemeral=True 제거 및 사용자 멘션 추가
-            await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 목표 배럭 수를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.")
+            # ephemeral=True 추가하여 본인에게만 보이도록 변경
+            await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 목표 배럭 수를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.", ephemeral=True)
     else:
         # 프로필 못찾은 에러는 계속 ephemeral 유지
         logging.warning(f"Slash Command: /setbarracks by {interaction.user.name} ({user_id_str}) - 사용자 데이터 없음") # 명령어 이름 로그 수정
