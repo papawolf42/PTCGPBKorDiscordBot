@@ -117,6 +117,9 @@ migration_flag = True # 필요에 따라 False로 변경
 # 테스트 플래그
 test_flag = False # True로 설정 시 모든 등록 유저를 온라인으로 간주, False로 설정 시 온라인 유저만 감지
 
+# 디버그 플래그
+debug_flag = False # True로 설정 시 디스코드 메시지 전송을 건너뜁니다.
+
 # asyncio 이벤트 추가
 initial_scan_complete_event = asyncio.Event()
 # 파일 쓰기 동기화를 위한 락
@@ -509,7 +512,7 @@ async def on_ready():
     load_all_data(HEARTBEAT_DATA_DIR, "Heartbeat", read_heartbeat_data, heartbeat_records)
     load_all_data(USER_DATA_DIR, "사용자 프로필", read_user_profile, user_profiles)
 
-    await update_user_profiles_from_source()
+    # await update_user_profiles_from_source() # 이전 위치 - Pastebin 데이터를 가져오는 부분
 
     # --- 누락된 Heartbeat 기록 스캔 최적화 ---
     logging.info("🔍 최신 Heartbeat 타임스탬프 찾는 중 (_last.json 파일 스캔)...")
@@ -564,7 +567,13 @@ async def on_ready():
             try:
                 channel = await bot.fetch_channel(channel_id)
                 # overall_latest_timestamp가 있으면 그 이후만, 없으면 최근 10000개 (또는 전체)
-                history_iterator = channel.history(limit=None, after=overall_latest_timestamp, oldest_first=True) if overall_latest_timestamp else channel.history(limit=10000, oldest_first=True)
+                scan_after_timestamp = overall_latest_timestamp
+                # 만약 저장된 최신 타임스탬프가 없거나, 너무 오래된 경우 (예: 1시간 이전)에는 최근 1시간만 조회
+                if scan_after_timestamp is None or (datetime.now(timezone.utc) - scan_after_timestamp) > timedelta(hours=1):
+                    scan_after_timestamp = datetime.now(timezone.utc) - timedelta(hours=1)
+                    logging.info(f"    최신 타임스탬프가 없거나 1시간 이상 경과되어, 최근 1시간({scan_after_timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')})부터 스캔합니다.")
+
+                history_iterator = channel.history(limit=None, after=scan_after_timestamp, oldest_first=True)
 
                 async for message in history_iterator:
                     channel_scanned += 1
@@ -600,6 +609,11 @@ async def on_ready():
 
     initial_scan_complete_event.set()
     logging.info("🏁 초기 스캔 완료 이벤트 설정됨. 주기적 상태 확인 시작 가능.")
+
+    # Heartbeat 처리 후 Pastebin에서 사용자 정보 가져오기
+    logging.info("🔄 Pastebin에서 사용자 정보를 가져오는 중...")
+    await update_user_profiles_from_source()
+    logging.info("✅ Pastebin 사용자 정보 업데이트 완료. Discord ID 매핑 완료됨.")
 
     logging.info(f'👂 오류 감지 및 알림 채널: {GODPACK_WEBHOOK_CHANNEL_ID}') # 이름 변경 및 로그 수정
 
@@ -643,9 +657,12 @@ async def on_message(message):
                     if write_user_profile(target_user_profile):
                         logging.info(f"  - 사용자 '{target_user_name}' 프로필 업데이트 성공 (목표 배럭 {reset_value}(으)로 복구됨).")
                         try:
-                            # ephemeral=True 를 사용하여 본인에게만 보이도록 알림 전송 (실제로 변경된 경우에만)
-                            await message.reply(f"✅ {message.author.mention}, 이 스레드에 댓글을 작성하여 목표 배럭이 `{original_value_for_log}`에서 `{reset_value}`(으)로 복구되었습니다.", ephemeral=True, delete_after=60) # 60초 후 자동 삭제
-                            logging.info(f"  - 목표 배럭 복구 알림 메시지 전송 완료 (대상: {message.author.name}).")
+                            if not debug_flag:
+                                # ephemeral=True 를 사용하여 본인에게만 보이도록 알림 전송 (실제로 변경된 경우에만)
+                                await message.reply(f"✅ {message.author.mention}, 이 스레드에 댓글을 작성하여 목표 배럭이 `{original_value_for_log}`에서 `{reset_value}`(으)로 복구되었습니다.", ephemeral=True, delete_after=60) # 60초 후 자동 삭제
+                                logging.info(f"  - 목표 배럭 복구 알림 메시지 전송 완료 (대상: {message.author.name}).")
+                            else:
+                                logging.info(f"  - [Debug Mode] 목표 배럭 복구 알림 메시지 전송 건너뜀.")
                         except discord.Forbidden:
                             logging.error(f"❌ 스레드 댓글 알림 메시지 전송 권한이 없습니다 (채널: {message.channel.id}).")
                         except Exception as e:
@@ -703,12 +720,15 @@ async def on_message(message):
                         # 알림 메시지 전송 (test_flag 확인)
                         if not test_flag:
                             try:
-                                alert_channel = message.channel
-                                alert_message = f"⚠️ 사용자 **{target_user_name}**(<@{discord_id_str}>) 목표 배럭 자동 조정: `{effective_current_target}` -> `{new_target_barracks}` (/목표배럭설정 명령어로 재설정가능)"
-                                await alert_channel.send(alert_message)
-                                logging.info(f"  - 알림 메시지 전송 완료 (채널: {alert_channel.id}).")
+                                if not debug_flag:
+                                    alert_channel = message.channel
+                                    alert_message = f"⚠️ 사용자 **{target_user_name}**(<@{discord_id_str}>) 목표 배럭 자동 조정: `{effective_current_target}` -> `{new_target_barracks}` (/목표배럭설정 명령어로 재설정가능)"
+                                    await alert_channel.send(alert_message)
+                                    logging.info(f"  - 알림 메시지 전송 완료 (채널: {alert_channel.id}).")
+                                else:
+                                    logging.info(f"  - [Debug Mode] 목표 배럭 자동 조정 알림 메시지 전송 건너뜀.")
                             except discord.Forbidden:
-                                logging.error(f"❌ 알림 채널({alert_channel.id})에 메시지를 보낼 권한이 없습니다.")
+                                logging.error(f"❌ 알림 채널({message.channel.id})에 메시지를 보낼 권한이 없습니다.") # alert_channel 변수가 선언되지 않았을 수 있음
                             except Exception as e:
                                 logging.error(f"❌ 알림 채널 메시지 전송 중 오류 발생: {e}", exc_info=True)
                         else:
@@ -883,6 +903,25 @@ async def update_friend_lists(online_users_profiles):
         print("온라인 유저가 없어 초기 목록 계산을 건너뜁니다.")
         return added_by_map
 
+    # --- 팩 그룹 정의 ---
+    NEW_PACKS = {"Shining"}
+    OLD_PACKS = {"Arceus", "Palkia", "Dialga", "Mew", "Pikachu", "Charizard", "Mewtwo"}
+
+    def get_pack_group(packs_set):
+        """팩 세트를 기반으로 팩 그룹(NewPack, OldPack, Unknown)을 반환합니다."""
+        if not packs_set or packs_set == {"Unknown"}:
+            return "Unknown"
+        # NewPack 팩이 하나라도 있으면 NewPack 그룹으로 간주 (우선순위 높음)
+        if not NEW_PACKS.isdisjoint(packs_set):
+            return "NewPack"
+        # NewPack이 없고 OldPack 팩이 하나라도 있으면 OldPack 그룹으로 간주
+        if not OLD_PACKS.isdisjoint(packs_set):
+            return "OldPack"
+        # 알려진 팩 그룹에 속하지 않으면 Unknown 반환
+        return "Unknown"
+    # --- 팩 그룹 정의 끝 ---
+
+
     online_user_ids = list(online_users_profiles.keys())
     total_barracks_all_online = sum(profile.get('barracks', 0) for profile in online_users_profiles.values())
     print(f"온라인 유저 수: {len(online_user_ids)}, 총 배럭: {total_barracks_all_online}, 기본 목표 배럭: {TARGET_BARRACKS_DEFAULT}")
@@ -923,6 +962,7 @@ async def update_friend_lists(online_users_profiles):
 
             u_group = u_profile.get('group_name')
             u_preferred_packs = set(u_profile.get('preferred_packs', []))
+            u_pack_group_preference = get_pack_group(u_preferred_packs) # 사용자의 팩 그룹 선호도 결정
             current_barracks = u_profile.get('barracks', 0)
             current_added_by_ids = [u_id]
 
@@ -940,88 +980,131 @@ async def update_friend_lists(online_users_profiles):
                 elif v_group == "Group6": group6_candidates.append(v_id)
                 else: other_group_candidates.append(v_id)
 
-            # --- 친구 선택 로직 (effective_target_barracks 사용) ---
+            # --- 친구 선택 로직 (effective_target_barracks 사용, 팩 그룹 우선순위 적용) ---
 
-            # Helper function to add friends from a list, prioritizing packs and add_count
-            def add_friends_from_candidates(candidates, u_pref_packs, current_barracks, effective_target, current_added_ids, add_cnt, profiles):
+            # Helper function to add friends from a list, prioritizing pack groups then add_count
+            def add_friends_from_candidates(candidates, u_group_pref, current_barracks, effective_target, current_added_ids, add_cnt, profiles):
                 new_barracks = current_barracks
                 # Process candidates only if the target isn't already met
                 if new_barracks >= effective_target:
                     return new_barracks, current_added_ids
 
-                preferred = []
-                others = []
+                # --- 후보자를 팩 그룹 기준으로 분류 ---
+                same_group_candidates = []
+                other_group_candidates = []
+                unknown_group_candidates = []
+
                 for v_id in candidates:
-                     # Ensure user exists in profiles before accessing packs
                      if v_id in profiles:
                          v_packs = set(profiles[v_id].get('preferred_packs', []))
-                         if u_pref_packs and not u_pref_packs.isdisjoint(v_packs):
-                             preferred.append(v_id)
-                         else:
-                             others.append(v_id)
+                         v_pack_group = get_pack_group(v_packs)
+
+                         if v_pack_group == "Unknown":
+                             unknown_group_candidates.append(v_id)
+                         elif v_pack_group == u_group_pref:
+                             same_group_candidates.append(v_id)
+                         else: # 다른 그룹 (NewPack vs OldPack)
+                             other_group_candidates.append(v_id)
                      else:
-                         # Handle case where v_id might not be in profiles (though unlikely with current logic)
                          print(f"경고: add_friends_from_candidates에서 프로필을 찾을 수 없음: {v_id}")
-                         others.append(v_id) # Add to others to be safe
+                         unknown_group_candidates.append(v_id) # 안전하게 Unknown으로 분류
+                # --- 후보자 분류 끝 ---
 
-                preferred.sort(key=lambda v_id: add_cnt.get(v_id, 0)) # Use .get for safety
-                others.sort(key=lambda v_id: add_cnt.get(v_id, 0))
+                # --- 각 그룹 내에서 add_count 기준으로 정렬 ---
+                same_group_candidates.sort(key=lambda v_id: add_cnt.get(v_id, 0))
+                other_group_candidates.sort(key=lambda v_id: add_cnt.get(v_id, 0))
+                unknown_group_candidates.sort(key=lambda v_id: add_cnt.get(v_id, 0))
+                # --- 정렬 끝 ---
 
-                for v_id in preferred + others:
+                # --- 우선순위 결합: 같은 그룹 > 다른 그룹 > 모르는 그룹 ---
+                # 사용자가 Unknown 선호일 경우, OldPack -> NewPack -> Unknown 순서로 우선순위 부여
+                if u_group_pref == "Unknown":
+                     # OldPack 후보 찾기
+                     old_pack_candidates_from_others = [v_id for v_id in other_group_candidates if get_pack_group(set(profiles[v_id].get('preferred_packs', []))) == "OldPack"]
+                     # NewPack 후보 찾기
+                     new_pack_candidates_from_others = [v_id for v_id in other_group_candidates if get_pack_group(set(profiles[v_id].get('preferred_packs', []))) == "NewPack"]
+                     # Unknown 선호 사용자를 위한 우선순위 리스트 생성
+                     prioritized_candidates = old_pack_candidates_from_others + new_pack_candidates_from_others + unknown_group_candidates
+                else:
+                    # 일반적인 경우의 우선순위 리스트
+                    prioritized_candidates = same_group_candidates + other_group_candidates + unknown_group_candidates
+                # --- 우선순위 결합 끝 ---
+
+
+                # --- 정렬된 우선순위 리스트를 순회하며 친구 추가 ---
+                for v_id in prioritized_candidates:
                     if new_barracks >= effective_target: break
                     if v_id not in current_added_ids: # Avoid re-adding
-                        # Ensure user exists in profiles before accessing barracks
                         if v_id in profiles:
                             v_barracks = profiles[v_id].get('barracks', 0)
+                            # 목표 배럭을 초과하지 않는 경우에만 추가
                             if new_barracks + v_barracks <= effective_target:
                                 current_added_ids.append(v_id)
                                 new_barracks += v_barracks
-                                add_cnt[v_id] = add_cnt.get(v_id, 0) + 1 # Use .get for safety
+                                add_cnt[v_id] = add_cnt.get(v_id, 0) + 1
+                            # 만약 목표 배럭을 딱 맞추거나 넘어서는 경우에도 추가해야 한다면, 아래 조건 추가
+                            # elif not preferred and not others and len(current_added_ids) == 1: # 내가 아직 아무도 추가 안했고, 이 친구가 유일한 옵션이면 추가 (최소 1명 보장)
+                            #     current_added_ids.append(v_id)
+                            #     new_barracks += v_barracks
+                            #     add_cnt[v_id] = add_cnt.get(v_id, 0) + 1
+
                         else:
                              print(f"경고: 친구 추가 중 프로필 찾을 수 없음: {v_id}")
+                # --- 친구 추가 로직 끝 ---
 
                 return new_barracks, current_added_ids
+            # --- 헬퍼 함수 정의 끝 ---
 
             if migration_flag and u_group == "Group6":
                 # ** 마이그레이션 모드 & Group6 유저 **
-                group1_3_combined = group1_candidates + group3_candidates # Combine G1 and G3
+                # 그룹 우선순위: Group1/3 -> Group6 -> Others
+                group1_3_combined = group1_candidates + group3_candidates
                 current_barracks, current_added_by_ids = add_friends_from_candidates(
-                    group1_3_combined, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                    group1_3_combined, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
                 )
                 if current_barracks < effective_target_barracks:
                      current_barracks, current_added_by_ids = add_friends_from_candidates(
-                         group6_candidates, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                         group6_candidates, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
                      )
                 if current_barracks < effective_target_barracks:
                      current_barracks, current_added_by_ids = add_friends_from_candidates(
-                         other_group_candidates, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                         other_group_candidates, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
                      )
 
             elif u_group == "Group1":
                  # ** Group1 유저 우선순위 **
+                 # 그룹 우선순위: Group1 -> Group3 -> Group6 -> Others
                  priority_order = [group1_candidates, group3_candidates, group6_candidates, other_group_candidates]
                  for candidate_list in priority_order:
                      if current_barracks >= effective_target_barracks: break
                      current_barracks, current_added_by_ids = add_friends_from_candidates(
-                         candidate_list, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                         candidate_list, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
                      )
 
             elif u_group == "Group3":
                  # ** Group3 유저 우선순위 **
+                 # 그룹 우선순위: Group3 -> Group1 -> Group6 -> Others
                  priority_order = [group3_candidates, group1_candidates, group6_candidates, other_group_candidates]
                  for candidate_list in priority_order:
                      if current_barracks >= effective_target_barracks: break
                      current_barracks, current_added_by_ids = add_friends_from_candidates(
-                         candidate_list, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                         candidate_list, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
                      )
 
             else:
                 # ** 일반 모드, Group6(non-migration), 기타 그룹 **
-                # 모든 후보 그룹을 합쳐서 팩 우선순위로 처리
-                all_candidates_combined = group1_candidates + group3_candidates + group6_candidates + other_group_candidates
-                current_barracks, current_added_by_ids = add_friends_from_candidates(
-                   all_candidates_combined, u_preferred_packs, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
-                )
+                # 디스코드 그룹(Group1, Group3, Group6, Others) 순서대로 처리
+                priority_order = [group1_candidates, group3_candidates, group6_candidates, other_group_candidates]
+                for candidate_list in priority_order:
+                    if current_barracks >= effective_target_barracks: break
+                    current_barracks, current_added_by_ids = add_friends_from_candidates(
+                       candidate_list, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                    )
+                # # 이전 로직: 모든 후보 그룹을 합쳐서 팩 그룹 우선순위로 처리
+                # all_candidates_combined = group1_candidates + group3_candidates + group6_candidates + other_group_candidates
+                # current_barracks, current_added_by_ids = add_friends_from_candidates(
+                #    all_candidates_combined, u_pack_group_preference, current_barracks, effective_target_barracks, current_added_by_ids, add_count, online_users_profiles
+                # )
 
             added_by_map[u_id] = current_added_by_ids
 
@@ -1061,6 +1144,11 @@ async def check_heartbeat_status():
     await bot.wait_until_ready()
     logging.info("⏳ 주기적 상태 확인 시작 대기 중 (초기 스캔 완료 후 진행)...")
     await initial_scan_complete_event.wait()
+    
+    # 초기 스캔 완료 후 처음 실행 시에는 pastebin에서 사용자 정보 업데이트를 기다림
+    logging.info("⏳ Pastebin 사용자 정보 업데이트 대기 중...")
+    await asyncio.sleep(5)  # Pastebin 데이터 로딩을 위한 짧은 대기 시간
+    
     logging.info("▶️ 주기적 상태 확인 시작!")
 
     while not bot.is_closed():
@@ -1155,6 +1243,11 @@ async def check_heartbeat_status():
         print("----------------------------------------------")
 
         # --- 친구 목록 업데이트 및 최적화 로직 호출 ---
+        # 주기적으로 Pastebin 데이터를 업데이트하여 최신 사용자 정보(Discord ID) 반영
+        logging.info("🔄 주기적 Pastebin 사용자 정보 업데이트 시작...")
+        await update_user_profiles_from_source()
+        logging.info("✅ 주기적 Pastebin 사용자 정보 업데이트 완료.")
+
         initial_map = await update_friend_lists(current_online_profiles)
 
         async with friend_list_lock:
@@ -1253,12 +1346,18 @@ async def post_gp_result(posting_channel: discord.abc.GuildChannel, attachments:
                     elif not target_tag_object: logging.warning(f"[{group_name}] 태그 키 '{tag_key}'(ID:{tag_id}) 태그 찾기 실패.")
                 elif tag_key: logging.warning(f"[{group_name}] 태그 키 '{tag_key}' 미정의.")
 
-                await posting_channel.create_thread(name=title, files=files_to_send, applied_tags=applied_tags_list)
-                logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 첨부파일 스레드 생성 완료.")
+                if not debug_flag:
+                    await posting_channel.create_thread(name=title, files=files_to_send, applied_tags=applied_tags_list)
+                    logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 첨부파일 스레드 생성 완료.")
+                else:
+                    logging.info(f"[{group_name}] [Debug Mode] 포럼 채널 '{posting_channel.name}'에 첨부파일 스레드 생성 건너뜀.")
 
             elif isinstance(posting_channel, discord.TextChannel):
-                await posting_channel.send(files=files_to_send)
-                logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 첨부파일 전송 완료.")
+                if not debug_flag:
+                    await posting_channel.send(files=files_to_send)
+                    logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 첨부파일 전송 완료.")
+                else:
+                     logging.info(f"[{group_name}] [Debug Mode] 텍스트 채널 '{posting_channel.name}'에 첨부파일 전송 건너뜀.")
             else: logging.warning(f"[{group_name}] 포스팅 채널 타입 미지원 (첨부파일만 전송).")
 
         elif inform is not None:
@@ -1277,12 +1376,18 @@ async def post_gp_result(posting_channel: discord.abc.GuildChannel, attachments:
                          yet_tag = discord.utils.get(posting_channel.available_tags, id=yet_tag_id)
                          if yet_tag: applied_tags_list.append(yet_tag); logging.info("... 기본 태그 'Yet' 적용")
 
-                await posting_channel.create_thread(name=title, content=inform, files=files_to_send, applied_tags=applied_tags_list)
-                logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 결과 스레드 생성 완료.")
+                if not debug_flag:
+                    await posting_channel.create_thread(name=title, content=inform, files=files_to_send, applied_tags=applied_tags_list)
+                    logging.info(f"[{group_name}] 포럼 채널 '{posting_channel.name}'에 결과 스레드 생성 완료.")
+                else:
+                     logging.info(f"[{group_name}] [Debug Mode] 포럼 채널 '{posting_channel.name}'에 결과 스레드 생성 건너뜀.")
 
             elif isinstance(posting_channel, discord.TextChannel):
-                await posting_channel.send(content=inform, files=files_to_send)
-                logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 결과 메시지 전송 완료.")
+                if not debug_flag:
+                    await posting_channel.send(content=inform, files=files_to_send)
+                    logging.info(f"[{group_name}] 텍스트 채널 '{posting_channel.name}'에 결과 메시지 전송 완료.")
+                else:
+                    logging.info(f"[{group_name}] [Debug Mode] 텍스트 채널 '{posting_channel.name}'에 결과 메시지 전송 건너뜀.")
             else: logging.warning(f"[{group_name}] 포스팅 채널 타입 미지원.")
 
         else: logging.warning(f"[{group_name}] 포스팅할 내용(본문/첨부) 없음.")
