@@ -146,6 +146,7 @@ class User:
         self.group_name: str | None = None # 사용자의 현재 소속 그룹 (최신 Heartbeat 기반)
         self.custom_target_barracks: int | None = None # 사용자 지정 목표 배럭
         self.preferred_pack_order: list[str] | None = None # 사용자 지정 팩 선호도 순서
+        self.graduated_packs: list[str] = [] # 졸업팩 목록 추가 (기본값 빈 리스트)
 
     def update_from_heartbeat(self, heartbeat_data, source_group_name: str | None = None): # source_group_name 인자 추가
         """Heartbeat 데이터 및 소스 그룹 정보로 사용자 정보 업데이트"""
@@ -176,7 +177,8 @@ class User:
             'discord_id': self.discord_id,
             'group_name': self.group_name,
             'custom_target_barracks': self.custom_target_barracks,
-            'preferred_pack_order': self.preferred_pack_order, # 추가
+            'preferred_pack_order': self.preferred_pack_order,
+            'graduated_packs': self.graduated_packs,
         }
 
     @classmethod
@@ -209,6 +211,13 @@ class User:
             user.preferred_pack_order = preferred_order
         else:
             user.preferred_pack_order = None # 기본값은 None, read_user_profile에서 처리
+
+        # graduated_packs 로드 (리스트 형태가 아니거나 없으면 빈 리스트)
+        graduated = data.get('graduated_packs')
+        if isinstance(graduated, list):
+            user.graduated_packs = graduated
+        else:
+            user.graduated_packs = [] # 기본값 빈 리스트
 
         return user
 
@@ -294,8 +303,7 @@ def write_heartbeat_data(user_name, data_list):
 # --- 데이터 처리 함수 (User Profile) ---
 def read_user_profile(user_name):
     """사용자 프로필 JSON 파일 읽기 (User 객체 반환, 없거나 오류 시 None)
-    파일 로드 시 custom_target_barracks 키가 없으면 기본값(TARGET_BARRACKS_DEFAULT)을 추가하고 파일을 업데이트합니다.
-    preferred_pack_order 키가 없거나 None이면 사용자의 pack_select를 최우선으로, 나머지는 랜덤 순서로 생성하여 추가하고 파일을 업데이트합니다.
+    파일 로드 시 필요한 키(custom_target_barracks, preferred_pack_order, graduated_packs)가 없으면 기본값을 추가하고 파일을 업데이트합니다.
     """
     filepath = get_data_filepath(user_name, USER_DATA_DIR)
     data = read_json_file(filepath, "프로필", user_name, None)
@@ -342,14 +350,19 @@ def read_user_profile(user_name):
             logging.info(f"    -> 생성된 순서: {new_order}")
         # --- 키 확인 및 기본값 추가 끝 ---
 
+        # --- graduated_packs 키 확인 및 기본값 추가 ---
+        if 'graduated_packs' not in data or not isinstance(data.get('graduated_packs'), list):
+            data['graduated_packs'] = [] # 기본값 빈 리스트 추가
+            needs_update = True
+        # --- 키 확인 및 기본값 추가 끝 ---
+
         user = User.from_dict(data)
         if user:
             # --- 파일 업데이트 (필요한 경우) ---
             if needs_update:
-                logging.info(f"  💾 사용자 '{user_name}' 프로필 파일 업데이트 (custom_target_barracks 또는 preferred_pack_order 추가/수정됨).")
-                if not write_user_profile(user): # 수정된 user 객체를 다시 저장
+                logging.info(f"  💾 사용자 '{user_name}' 프로필 파일 업데이트 (필요한 기본값 추가/수정됨).")
+                if not write_user_profile(user):
                     logging.warning(f"⚠️ 사용자 '{user_name}' 프로필 파일 업데이트 실패: {filepath}")
-                    # 업데이트 실패해도 로드된 user 객체는 반환
             # --- 파일 업데이트 끝 ---
             return user
         else:
@@ -844,6 +857,20 @@ async def on_message(message):
 # class HeartbeatManager: ...
 
 # --- Friend List Generation Logic ---
+
+# parse_pack_select 함수를 여기로 이동
+def parse_pack_select(pack_select_str: str) -> list[str]:
+    """pack_select 문자열을 파싱하여 유효한 팩 리스트 반환"""
+    if not pack_select_str or pack_select_str == 'Unknown':
+        return []
+    packs = []
+    valid_pack_names_lower = {vp.lower(): vp for vp in VALID_PACKS}
+    for raw_pack in pack_select_str.split(','):
+        lower_pack = raw_pack.strip().lower()
+        if lower_pack in valid_pack_names_lower:
+            packs.append(valid_pack_names_lower[lower_pack])
+    return packs
+
 async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
     """
     계산된 added_by_map을 기반으로 data/raw/ 디렉토리에
@@ -854,6 +881,7 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
     """
     raw_dir = "data/raw"
     print(f"--- 친구 목록 파일 생성 시작 ({raw_dir}) ---")
+    logging.debug(f"DEBUG: generate_friend_list_files 호출됨. user_profiles_for_gen 키: {list(user_profiles_for_gen.keys())}") # 전달된 프로필 키 확인
 
     try:
         if os.path.exists(raw_dir):
@@ -968,6 +996,16 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
             else:
                 default_order_str = ", ".join(DEFAULT_PACK_ORDER)
                 lines_for_added_by_file.append(f"My Pack Preference: Default ({default_order_str})")
+
+            # --- 사용자 졸업팩 정보 추가 ---
+            u_graduated_packs = u_profile_info.get('graduated_packs')
+            if u_graduated_packs and isinstance(u_graduated_packs, list):
+                 graduated_str = ", ".join(u_graduated_packs)
+                 lines_for_added_by_file.append(f"My Graduated Packs: {graduated_str}")
+            else:
+                 lines_for_added_by_file.append(f"My Graduated Packs: None") # 목록이 비어있거나 없을 경우
+            # --- 사용자 졸업팩 정보 추가 끝 ---
+
             lines_for_added_by_file.append("")
             lines_for_added_by_file.append("Friend Code\tUsername\tGroup\tBarracks\tCurrent Pack")
             lines_for_added_by_file.append("-----------\t--------\t-----\t--------\t------------")
@@ -1015,19 +1053,19 @@ async def update_friend_lists(online_users_profiles):
     """
     온라인 유저 목록을 기반으로 초기 친구 추가 목록({username}_added_by)을 계산합니다.
     사용자별 custom_target_barracks를 우선 적용하고, 없으면 TARGET_BARRACKS_DEFAULT를 사용합니다.
-    사용자의 preferred_pack_order(팩 선호도)와 다른 사용자의 add_count(추가된 횟수)를 기준으로
-    목표 배럭을 채울 때까지 친구를 선택하여 추가합니다. 그룹 정보는 친구 선택에 사용되지 않습니다.
+    1차: 사용자의 졸업팩을 제외한 후보 중에서, 팩 선호도와 추가된 횟수를 기준으로 친구를 선택합니다.
+    2차: 1차에서 목표 배럭 미달 시, 졸업팩 유저 중에서 추가 횟수가 적은 순으로 목표를 채울 때까지 추가합니다.
 
     Args:
         online_users_profiles: 온라인 상태인 사용자들의 프로필 정보 딕셔너리.
             - key: 사용자 Discord ID (str)
-            - value: 사용자 정보 딕셔너리 (barracks, pack_select, friend_code, group_name, custom_target_barracks, preferred_pack_order 등 포함)
+            - value: 사용자 정보 딕셔너리 (barracks, pack_select, friend_code, group_name, custom_target_barracks, preferred_pack_order, graduated_packs 등 포함)
     Returns:
         dict: 계산된 added_by_map. 각 사용자가 추가해야 할 친구들의 Discord ID 리스트.
             - key: 사용자 Discord ID (str)
             - value: 해당 사용자가 추가할 친구 Discord ID 리스트 (자기 자신 포함)
     """
-    print("--- 초기 친구 목록 계산 시작 ---")
+    print("--- 초기 친구 목록 계산 시작 (졸업팩 로직 포함) ---")
     added_by_map = {}
     if not online_users_profiles:
         print("온라인 유저가 없어 초기 목록 계산을 건너뜁니다.")
@@ -1083,49 +1121,80 @@ async def update_friend_lists(online_users_profiles):
             for v_id in other_users:
                 add_count[v_id] = add_count.get(v_id, 0) + 1
     else:
-        print(f"시나리오 2/3: 총 배럭 >= 기본 목표. 유저별 목록 계산 시작...")
+        print(f"시나리오 2/3: 총 배럭 >= 기본 목표. 유저별 목록 계산 시작 (졸업팩 로직 적용)...")
 
-        # --- 친구 선택 로직 헬퍼 함수 --- (팩 선호도 기반으로 수정)
-        def add_friends_from_candidates(candidates_to_consider: list[str], u_preferred_order: list[str], current_barracks: int, effective_target: int, current_added_ids: list[str], add_cnt: dict, profiles: dict):
+        # --- 친구 선택 로직 헬퍼 함수 (수정됨) ---
+        def add_friends_from_candidates(
+            candidates_to_consider: list[str],
+            sort_priority: str, # "preference" 또는 "add_count"
+            u_preferred_order: list[str], # sort_priority가 "preference"일 때 필요
+            current_barracks: int,
+            effective_target: int,
+            current_added_ids: list[str], # 이 함수 내에서 수정됨
+            add_cnt: dict,              # 이 함수 내에서 수정됨
+            profiles: dict
+        ) -> int: # 추가된 배럭 수를 반환 (변경된 current_barracks)
             """
-            주어진 후보 목록에서 팩 선호도와 add_count를 기준으로 친구를 추가합니다.
+            주어진 후보 목록에서 지정된 우선순위에 따라 친구를 추가합니다.
             """
             new_barracks = current_barracks
             if new_barracks >= effective_target:
-                return new_barracks, current_added_ids
+                return new_barracks
 
-            # 후보자들을 (우선순위_팩, 우선순위_add_count, user_id) 튜플 리스트로 변환
             candidate_details = []
             for v_id in candidates_to_consider:
                 # 이미 추가된 유저는 제외
                 if v_id in current_added_ids: continue
                 v_profile = profiles.get(v_id)
                 if v_profile:
-                    v_pack_select = v_profile.get('pack_select', 'Unknown') # 후보자의 현재 팩
+                    v_pack_select_str = v_profile.get('pack_select', 'Unknown')
                     v_add_count = add_cnt.get(v_id, 0)
+                    v_packs = parse_pack_select(v_pack_select_str) # 후보자 팩 목록 파싱
 
-                    # 우선순위 계산: 요청자의 선호 팩 목록에서의 인덱스
-                    try:
-                        pack_priority = u_preferred_order.index(v_pack_select)
-                    except ValueError:
-                        pack_priority = float('inf') # 선호 목록에 없으면 최하 순위
+                    primary_sort_key = float('inf') # 기본 정렬 키 (낮을수록 좋음)
+                    secondary_sort_key = v_add_count # 2차 정렬 키 (add_count)
 
-                    candidate_details.append((pack_priority, v_add_count, v_id))
+                    if sort_priority == "preference":
+                        # 우선순위: 요청자의 선호 팩 목록에서의 인덱스
+                        # 후보자의 팩 중 가장 선호하는 팩의 인덱스를 찾음
+                        current_min_index = float('inf')
+                        if v_packs:
+                            for v_pack in v_packs:
+                                try:
+                                    index = u_preferred_order.index(v_pack)
+                                    if index < current_min_index:
+                                        current_min_index = index
+                                except ValueError:
+                                    continue # 선호 목록에 없으면 무시
+                        primary_sort_key = current_min_index
+                        # 1순위: 팩 우선순위(낮을수록 좋음), 2순위: add_count(낮을수록 좋음)
+                        candidate_details.append((primary_sort_key, secondary_sort_key, v_id))
+
+                    elif sort_priority == "add_count":
+                         # 1순위: add_count(낮을수록 좋음)
+                         primary_sort_key = v_add_count
+                         # 2순위는 여기선 불필요 (혹은 이름순? - 일단 생략)
+                         candidate_details.append((primary_sort_key, v_id)) # 튜플 구조 변경 주의
+
+                    else: # 알 수 없는 정렬 기준
+                        logging.warning(f"Unknown sort_priority: {sort_priority}")
+                        continue
                 else:
                     logging.warning(f"add_friends_from_candidates: 후보자 프로필 누락 ({v_id})")
 
-            # 정렬: 1순위: pack_priority (오름차순, 선호도 높을수록 작음), 2순위: add_count (오름차순)
+            # 정렬
             candidate_details.sort()
 
             # 정렬된 후보자 리스트를 순회하며 친구 추가
-            for _, _, v_id in candidate_details:
+            processed_candidates = 0
+            for details in candidate_details:
+                v_id = details[-1] # 마지막 요소가 항상 user_id
+
                 if new_barracks >= effective_target: break # 목표 도달 시 중단
 
                 v_profile = profiles.get(v_id)
                 if v_profile:
                     v_barracks = v_profile.get('barracks', 0)
-                    # 목표 배럭을 초과하지 않는 경우에만 추가
-                    # 단, 아직 아무도 추가 안 했고 이 후보를 추가해야 목표를 넘더라도 추가 (최소 1명 보장 시도)
                     can_add = (new_barracks + v_barracks <= effective_target) or \
                               (len(current_added_ids) == 1 and new_barracks < effective_target)
 
@@ -1133,15 +1202,17 @@ async def update_friend_lists(online_users_profiles):
                         current_added_ids.append(v_id)
                         new_barracks += v_barracks
                         add_cnt[v_id] = add_cnt.get(v_id, 0) + 1
-                else:
-                    pass # 프로필 누락 로그는 위에서 처리
+                        processed_candidates += 1
+                else: pass # 프로필 누락 로그는 위에서 처리
 
-            return new_barracks, current_added_ids
+            logging.debug(f"  - ({sort_priority} 정렬) 후보 {len(candidates_to_consider)}명 중 {processed_candidates}명 추가. 현재 배럭: {new_barracks}/{effective_target}")
+            return new_barracks
         # --- 헬퍼 함수 정의 끝 ---
 
         # --- 각 온라인 유저에 대해 친구 목록 계산 --- (로직 동일, 헬퍼 함수 수정됨)
         for u_id in online_user_ids:
             u_profile = online_users_profiles[u_id]
+            logging.debug(f" -> 사용자 [{u_profile.get('username', u_id)}] 친구 목록 계산 시작...") # 로깅 추가
 
             # 사용자별 유효 목표 배럭 결정
             custom_target = u_profile.get('custom_target_barracks')
@@ -1149,29 +1220,70 @@ async def update_friend_lists(online_users_profiles):
             if custom_target is not None and isinstance(custom_target, int) and custom_target > 0:
                  effective_target_barracks = custom_target
 
-            u_group = u_profile.get('group_name')
+            u_graduated_packs = set(u_profile.get('graduated_packs', [])) # 빠른 조회를 위해 set 사용
             u_preferred_order = get_safe_preferred_order(u_profile)
             current_barracks = u_profile.get('barracks', 0) # 본인 배럭부터 시작
             current_added_by_ids = added_by_map[u_id][:] # 초기 상태 (자기 자신만 포함된 리스트 복사)
+            logging.debug(f"  - 초기 상태: 배럭={current_barracks}, 목표={effective_target_barracks}, 졸업팩={u_graduated_packs}") # 로깅 추가
 
-            # --- 친구 후보 리스트 생성 (그룹 분류 없이) ---
+            # --- 친구 후보 분류 (졸업팩 기준) ---
+            non_graduated_candidates = []
+            graduated_candidates = []
             all_candidates = [v_id for v_id in online_user_ids if u_id != v_id] # 자기 자신 제외
-            # --- 친구 후보 리스트 생성 끝 ---
 
-            # --- 친구 추가 시도 (그룹 우선순위 없이 단일 리스트 사용) ---
-            if current_barracks < effective_target_barracks and all_candidates: # 후보가 있을 때만 시도
-                current_barracks, current_added_by_ids = add_friends_from_candidates(
-                    all_candidates, # 그룹 분류 없는 전체 후보 리스트 전달
-                    u_preferred_order,
-                    current_barracks,
-                    effective_target_barracks,
-                    current_added_by_ids, # 기존에 추가된 ID 목록 전달 (add_friends_from_candidates가 수정하도록)
-                    add_count,
-                    online_users_profiles
+            for v_id in all_candidates:
+                v_profile = online_users_profiles.get(v_id)
+                if not v_profile: continue
+
+                v_pack_select_str = v_profile.get('pack_select', 'Unknown')
+                v_packs = parse_pack_select(v_pack_select_str)
+
+                # 후보의 팩 중 하나라도 졸업 목록에 있는지 확인
+                is_graduated = False
+                if u_graduated_packs: # 사용자가 졸업팩을 설정했을 때만 검사
+                    for v_pack in v_packs:
+                        if v_pack in u_graduated_packs:
+                            is_graduated = True
+                            break
+
+                if is_graduated:
+                    graduated_candidates.append(v_id)
+                else:
+                    non_graduated_candidates.append(v_id)
+            logging.debug(f"  - 후보 분류: 비졸업({len(non_graduated_candidates)}명), 졸업({len(graduated_candidates)}명)") # 로깅 추가
+            # --- 친구 후보 분류 끝 ---
+
+            # --- 1단계: 비졸업 후보 추가 (선호도 우선) ---
+            if non_graduated_candidates:
+                current_barracks = add_friends_from_candidates(
+                    candidates_to_consider=non_graduated_candidates,
+                    sort_priority="preference", # 선호도 우선 정렬
+                    u_preferred_order=u_preferred_order,
+                    current_barracks=current_barracks,
+                    effective_target=effective_target_barracks,
+                    current_added_ids=current_added_by_ids, # 이 리스트가 직접 수정됨
+                    add_cnt=add_count,                     # 이 딕셔너리가 직접 수정됨
+                    profiles=online_users_profiles
+                )
+
+            # --- 2단계: 목표 미달 시 졸업 후보 추가 (add_count 우선) ---
+            if current_barracks < effective_target_barracks and graduated_candidates:
+                logging.debug(f"  - 목표({effective_target_barracks}) 미달, 졸업 후보({len(graduated_candidates)}명) 추가 시도...") # 로깅 추가
+                current_barracks = add_friends_from_candidates(
+                    candidates_to_consider=graduated_candidates,
+                    sort_priority="add_count", # 추가 횟수 우선 정렬
+                    u_preferred_order=u_preferred_order, # 사용되진 않지만 함수 시그니처 맞춤
+                    current_barracks=current_barracks,
+                    effective_target=effective_target_barracks,
+                    current_added_ids=current_added_by_ids,
+                    add_cnt=add_count,
+                    profiles=online_users_profiles
                 )
 
             # 최종 추가된 친구 목록 저장
             added_by_map[u_id] = current_added_by_ids
+            logging.debug(f" <- 사용자 [{u_profile.get('username', u_id)}] 계산 완료. 최종 친구 수: {len(current_added_by_ids)}, 최종 배럭 합계 추정: {current_barracks}") # 로깅 추가
+
 
     print("--- 초기 친구 목록 계산 완료 ---")
     return added_by_map
@@ -1294,6 +1406,7 @@ async def check_heartbeat_status():
                          'group_name': user_profile.group_name,
                          'custom_target_barracks': user_profile.custom_target_barracks,
                          'preferred_pack_order': user_profile.preferred_pack_order, # 팩 선호도 순서 전달
+                         'graduated_packs': user_profile.graduated_packs, # <<< 누락된 라인 추가
                      }
                 else:
                      print(f"  경고: 온라인 사용자 '{display_name}'의 Discord ID가 없어 친구 목록 생성에서 제외됩니다.")
@@ -1559,6 +1672,14 @@ async def my_profile_info(interaction: discord.Interaction):
                 preferred_order_display += ", ..."
         embed.add_field(name="팩선호도", value=preferred_order_display, inline=False) # inline=False로 설정하여 다음 줄에 표시
         # --- 팩선호도 추가 끝 ---
+
+        # --- 졸업팩 정보 추가 ---
+        graduated_packs_display = "없음"
+        if target_user_profile.graduated_packs:
+            graduated_packs_display = ", ".join(target_user_profile.graduated_packs)
+        embed.add_field(name="졸업팩 목록", value=graduated_packs_display, inline=False)
+        # --- 졸업팩 정보 추가 끝 ---
+
         embed.set_footer(text="이 메시지는 당신에게만 보입니다.")
 
         if not debug_flag:
@@ -1707,6 +1828,95 @@ async def set_preferred_packs(
         target_user_profile.preferred_pack_order = old_order
         if not debug_flag:
             await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 팩 선호도를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.", ephemeral=True)
+
+@bot.tree.command(name="졸업팩", description="졸업팩 목록을 설정합니다. 인자를 비우면 초기화됩니다.")
+@app_commands.describe(
+    pack1="졸업할 팩 (선택)",
+    pack2="졸업할 팩 (선택)",
+    pack3="졸업할 팩 (선택)",
+    pack4="졸업할 팩 (선택)"
+)
+@app_commands.autocomplete(pack1=pack_autocomplete_placeholder, pack2=pack_autocomplete_placeholder, pack3=pack_autocomplete_placeholder, pack4=pack_autocomplete_placeholder)
+@app_commands.guilds(YOUR_TEST_SERVER_ID)
+async def set_graduated_packs(
+    interaction: discord.Interaction,
+    pack1: str = None,
+    pack2: str = None,
+    pack3: str = None,
+    pack4: str = None
+):
+    """졸업팩 목록을 설정/초기화하는 명령어"""
+    user_id_str = str(interaction.user.id)
+    target_user_profile: User | None = None
+    target_user_name = "Unknown"
+    # 사용자 프로필 찾는 로직 (find_user_profile 헬퍼 함수 대신 직접 구현)
+    for user_name, profile in user_profiles.items():
+        if profile.discord_id == user_id_str:
+            target_user_profile = profile
+            target_user_name = user_name
+            break
+
+    if not target_user_profile:
+        logging.warning(f"Slash Command: /졸업팩 by {interaction.user.name} - 사용자 데이터 없음")
+        # --- 조건 원복 ---
+        if not debug_flag: await interaction.response.send_message("프로필 정보를 찾을 수 없습니다.", ephemeral=True); return
+
+    # 입력된 팩 인자들을 리스트로 모음 (None 제외)
+    provided_packs = [p for p in [pack1, pack2, pack3, pack4] if p is not None]
+
+    if not provided_packs:
+        # --- 초기화 로직 ---
+        if not target_user_profile.graduated_packs:
+             # --- 조건 원복 ---
+             if not debug_flag: await interaction.response.send_message("졸업팩 목록이 이미 비어있습니다.", ephemeral=True); return
+
+        original_list = target_user_profile.graduated_packs[:] # 롤백용
+        target_user_profile.graduated_packs = []
+        if write_user_profile(target_user_profile):
+            logging.info(f"Slash Command: /졸업팩 by {interaction.user.name} - 사용자: {target_user_name} - 초기화 성공")
+            # --- 조건 원복 ---
+            if not debug_flag:
+                await interaction.response.send_message("✅ 졸업팩 목록을 초기화했습니다.", ephemeral=True)
+        else:
+            logging.error(f"Slash Command: /졸업팩 by {interaction.user.name} - 사용자: {target_user_name} - 초기화 실패")
+            target_user_profile.graduated_packs = original_list # 롤백
+            # --- 조건 원복 ---
+            if not debug_flag:
+                await interaction.response.send_message("❌ 졸업팩 초기화 중 오류가 발생했습니다. (파일 저장 실패)", ephemeral=True)
+        return # 초기화 후 종료
+
+    # --- 목록 설정 로직 ---
+    # 유효성 검사
+    invalid_packs = [p for p in provided_packs if p not in VALID_PACKS]
+    if invalid_packs:
+        # --- 조건 원복 ---
+        if not debug_flag: await interaction.response.send_message(f"유효하지 않은 팩 이름이 포함되어 있습니다: {', '.join(invalid_packs)}", ephemeral=True); return
+
+    # 중복 제거 (순서는 유지하되 중복 제거)
+    unique_provided_packs = []
+    seen_packs = set()
+    for p in provided_packs:
+        if p not in seen_packs:
+            unique_provided_packs.append(p)
+            seen_packs.add(p)
+
+    # 변경 및 저장
+    original_list = target_user_profile.graduated_packs[:] # 롤백용
+    target_user_profile.graduated_packs = unique_provided_packs # 입력된 팩 목록으로 덮어쓰기
+
+    if write_user_profile(target_user_profile):
+        logging.info(f"Slash Command: /졸업팩 by {interaction.user.name} - 사용자: {target_user_name} - 설정: {unique_provided_packs}")
+        # 사용자에게 보여줄 때도 join 사용
+        # --- 조건 원복 ---
+        if not debug_flag:
+            await interaction.response.send_message(f"✅ 졸업팩 목록을 설정했습니다: {', '.join(unique_provided_packs)}", ephemeral=True)
+    else:
+        logging.error(f"Slash Command: /졸업팩 by {interaction.user.name} - 사용자: {target_user_name} - 설정 실패: {unique_provided_packs}")
+        target_user_profile.graduated_packs = original_list # 롤백
+        # --- 조건 원복 ---
+        if not debug_flag:
+            await interaction.response.send_message("❌ 졸업팩 목록 설정 중 오류가 발생했습니다. (파일 저장 실패)", ephemeral=True)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
