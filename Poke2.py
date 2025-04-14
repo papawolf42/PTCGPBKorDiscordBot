@@ -121,9 +121,6 @@ heartbeat_records = {}
 # 사용자 프로필 정보 (메모리): {user_name: User}
 user_profiles = {}
 
-# 마이그레이션 플래그 (True일 경우 Group6 친추 시 Group1/3 우선 배정)
-migration_flag = True # 필요에 따라 False로 변경
-
 # 테스트 플래그
 test_flag = False # True로 설정 시 모든 등록 유저를 온라인으로 간주, False로 설정 시 온라인 유저만 감지
 
@@ -1018,10 +1015,17 @@ async def update_friend_lists(online_users_profiles):
     """
     온라인 유저 목록을 기반으로 초기 친구 추가 목록({username}_added_by)을 계산합니다.
     사용자별 custom_target_barracks를 우선 적용하고, 없으면 TARGET_BARRACKS_DEFAULT를 사용합니다.
-    사용자별 preferred_pack_order를 기준으로 친구를 우선 선택하고, 부족하면 그룹 및 add_count 순으로 추가합니다.
-    migration_flag가 True이면 Group6 유저는 Group1/3 유저를 그룹 우선순위로 고려합니다.
-    online_users_profiles: { user_id_str: { 'username': str, 'barracks': int, 'pack_select': str, 'friend_code': str|None, 'group_name': str|None, 'custom_target_barracks': int|None, 'preferred_pack_order': list[str]|None } }
-    반환값: 계산된 added_by_map { u_id_str: [v1_id_str, v2_id_str...] }
+    사용자의 preferred_pack_order(팩 선호도)와 다른 사용자의 add_count(추가된 횟수)를 기준으로
+    목표 배럭을 채울 때까지 친구를 선택하여 추가합니다. 그룹 정보는 친구 선택에 사용되지 않습니다.
+
+    Args:
+        online_users_profiles: 온라인 상태인 사용자들의 프로필 정보 딕셔너리.
+            - key: 사용자 Discord ID (str)
+            - value: 사용자 정보 딕셔너리 (barracks, pack_select, friend_code, group_name, custom_target_barracks, preferred_pack_order 등 포함)
+    Returns:
+        dict: 계산된 added_by_map. 각 사용자가 추가해야 할 친구들의 Discord ID 리스트.
+            - key: 사용자 Discord ID (str)
+            - value: 해당 사용자가 추가할 친구 Discord ID 리스트 (자기 자신 포함)
     """
     print("--- 초기 친구 목록 계산 시작 ---")
     added_by_map = {}
@@ -1079,7 +1083,7 @@ async def update_friend_lists(online_users_profiles):
             for v_id in other_users:
                 add_count[v_id] = add_count.get(v_id, 0) + 1
     else:
-        print(f"시나리오 2/3: 총 배럭 >= 기본 목표. 유저별 목록 계산 시작 (migration_flag: {migration_flag})...")
+        print(f"시나리오 2/3: 총 배럭 >= 기본 목표. 유저별 목록 계산 시작...")
 
         # --- 친구 선택 로직 헬퍼 함수 --- (팩 선호도 기반으로 수정)
         def add_friends_from_candidates(candidates_to_consider: list[str], u_preferred_order: list[str], current_barracks: int, effective_target: int, current_added_ids: list[str], add_cnt: dict, profiles: dict):
@@ -1150,58 +1154,18 @@ async def update_friend_lists(online_users_profiles):
             current_barracks = u_profile.get('barracks', 0) # 본인 배럭부터 시작
             current_added_by_ids = added_by_map[u_id][:] # 초기 상태 (자기 자신만 포함된 리스트 복사)
 
-            # 친구 후보 분류 (그룹 기준)
-            group_candidates = {"Group1": [], "Group3": [], "Group6": [], "Other": []}
-            for v_id in online_user_ids:
-                if u_id == v_id: continue # 자기 자신 제외
-                v_profile = online_users_profiles[v_id]
-                v_group = v_profile.get('group_name')
-                if v_group in group_candidates:
-                    group_candidates[v_group].append(v_id)
-                else:
-                    group_candidates["Other"].append(v_id) # Group1/3/6 아니면 Other로
+            # --- 친구 후보 리스트 생성 (그룹 분류 없이) ---
+            all_candidates = [v_id for v_id in online_user_ids if u_id != v_id] # 자기 자신 제외
+            # --- 친구 후보 리스트 생성 끝 ---
 
-            # --- 그룹 우선순위 결정 --- (로직 동일)
-            group_priority_order = []
-            if migration_flag and u_group == "Group6":
-                group_priority_order = [
-                    group_candidates["Group1"] + group_candidates["Group3"],
-                    group_candidates["Group6"],
-                    group_candidates["Other"]
-                ]
-            elif u_group == "Group1":
-                group_priority_order = [
-                    group_candidates["Group1"],
-                    group_candidates["Group3"],
-                    group_candidates["Group6"],
-                    group_candidates["Other"]
-                ]
-            elif u_group == "Group3":
-                group_priority_order = [
-                    group_candidates["Group3"],
-                    group_candidates["Group1"],
-                    group_candidates["Group6"],
-                    group_candidates["Other"]
-                ]
-            else: # Group6(non-migration) 또는 Other 그룹
-                group_priority_order = [
-                    group_candidates["Group1"],
-                    group_candidates["Group3"],
-                    group_candidates["Group6"],
-                    group_candidates["Other"]
-                ]
-
-            # --- 그룹 우선순위에 따라 친구 추가 시도 --- (로직 동일, 수정된 헬퍼 사용)
-            for candidates_in_group in group_priority_order:
-                if current_barracks >= effective_target_barracks: break # 목표 도달 시 중단
-                if not candidates_in_group: continue # 해당 그룹에 후보 없으면 다음 그룹으로
-
+            # --- 친구 추가 시도 (그룹 우선순위 없이 단일 리스트 사용) ---
+            if current_barracks < effective_target_barracks and all_candidates: # 후보가 있을 때만 시도
                 current_barracks, current_added_by_ids = add_friends_from_candidates(
-                    candidates_in_group,
+                    all_candidates, # 그룹 분류 없는 전체 후보 리스트 전달
                     u_preferred_order,
                     current_barracks,
                     effective_target_barracks,
-                    current_added_by_ids,
+                    current_added_by_ids, # 기존에 추가된 ID 목록 전달 (add_friends_from_candidates가 수정하도록)
                     add_count,
                     online_users_profiles
                 )
@@ -1597,10 +1561,12 @@ async def my_profile_info(interaction: discord.Interaction):
         # --- 팩선호도 추가 끝 ---
         embed.set_footer(text="이 메시지는 당신에게만 보입니다.")
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
     else:
         logging.warning(f"Slash Command: /myinfo by {interaction.user.name} ({user_id_str}) - 사용자 데이터 없음") # 명령어 이름 로그 수정
-        await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
 
 @bot.tree.command(name="목표배럭설정", description="내 목표 배럭 수를 설정합니다.")
 @app_commands.describe(barracks="설정할 목표 배럭 수 (예: 160)")
@@ -1612,7 +1578,8 @@ async def set_target_barracks(interaction: discord.Interaction, barracks: int):
 
     # 입력값 기본 검증 (0 이하 또는 너무 큰 값 방지 - 예: 500 초과)
     if barracks <= 0 or barracks > 500:
-        await interaction.response.send_message(f"목표 배럭 수는 1 이상 500 이하의 값이어야 합니다.", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message(f"목표 배럭 수는 1 이상 500 이하의 값이어야 합니다.", ephemeral=True)
         return
 
     # 메모리에서 사용자 찾기
@@ -1633,17 +1600,20 @@ async def set_target_barracks(interaction: discord.Interaction, barracks: int):
         if write_user_profile(target_user_profile):
             logging.info(f"  - 사용자 '{target_user_name}' 프로필 업데이트 성공.")
             # ephemeral=True 추가하여 본인에게만 보이도록 변경
-            await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 목표 배럭 수가 `{effective_old_value}`에서 `{barracks}`(으)로 성공적으로 변경되었습니다.", ephemeral=True)
+            if not debug_flag:
+                await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 목표 배럭 수가 `{effective_old_value}`에서 `{barracks}`(으)로 성공적으로 변경되었습니다.", ephemeral=True)
         else:
             logging.error(f"  - 사용자 '{target_user_name}' 프로필 업데이트 실패.")
             # 실패 시 메모리 값 롤백 (선택 사항)
             target_user_profile.custom_target_barracks = old_value
             # ephemeral=True 추가하여 본인에게만 보이도록 변경
-            await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 목표 배럭 수를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.", ephemeral=True)
+            if not debug_flag:
+                await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 목표 배럭 수를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.", ephemeral=True)
     else:
         # 프로필 못찾은 에러는 계속 ephemeral 유지
         logging.warning(f"Slash Command: /setbarracks by {interaction.user.name} ({user_id_str}) - 사용자 데이터 없음") # 명령어 이름 로그 수정
-        await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없어 목표 배럭을 설정할 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없어 목표 배럭을 설정할 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
 
 # /팩선호도 명령어 자동완성 함수
 async def pack_autocomplete_placeholder(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
@@ -1671,23 +1641,23 @@ async def set_preferred_packs(
 
     # 간단한 유효성 검사 (예: 중복 확인 - 필요시 추가)
     if not preferred_packs: # pack1은 필수이므로 이 경우는 사실상 없음
-        await interaction.response.send_message("적어도 1개의 팩을 선택해야 합니다.", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message("적어도 1개의 팩을 선택해야 합니다.", ephemeral=True)
         return
 
     # 선택된 팩들이 유효한지 확인 (VALID_PACKS에 있는지)
     invalid_packs = [p for p in preferred_packs if p not in VALID_PACKS]
     if invalid_packs:
-        await interaction.response.send_message(f"유효하지 않은 팩 이름이 포함되어 있습니다: {', '.join(invalid_packs)}", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message(f"유효하지 않은 팩 이름이 포함되어 있습니다: {', '.join(invalid_packs)}", ephemeral=True)
         return
 
     # 중복 확인
     if len(preferred_packs) != len(set(preferred_packs)):
-         await interaction.response.send_message(f"중복된 팩 이름이 있습니다. 각 팩은 한 번만 선택해주세요.", ephemeral=True)
-         return
+        if not debug_flag:
+            await interaction.response.send_message(f"중복된 팩 이름이 있습니다. 각 팩은 한 번만 선택해주세요.", ephemeral=True)
+        return
 
-
-    preference_text = ", ".join([f"{i+1}: {pack}" for i, pack in enumerate(preferred_packs)])
-    await interaction.response.send_message(f"✅ `/팩선호도` 명령어가 호출되었습니다! (사용자: {interaction.user.mention})\n설정된 선호도: {preference_text}", ephemeral=True)
     logging.info(f"✅ /팩선호도 명령어 호출됨 (사용자: {interaction.user.name}, 값: {preferred_packs})")
 
     # --- 사용자 프로필 찾기 ---
@@ -1703,7 +1673,8 @@ async def set_preferred_packs(
 
     if not target_user_profile:
         logging.warning(f"Slash Command: /팩선호도 by {interaction.user.name} ({user_id_str}) - 사용자 데이터 없음")
-        await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없어 팩 선호도를 설정할 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message("당신의 프로필 정보를 찾을 수 없어 팩 선호도를 설정할 수 없습니다. Heartbeat 정보가 먼저 기록되어야 할 수 있습니다.", ephemeral=True)
         return
     # --- 사용자 프로필 찾기 끝 ---
 
@@ -1728,12 +1699,14 @@ async def set_preferred_packs(
         # 변경된 순서 표시 (최대 8개)
         display_order = ", ".join(new_preferred_order[:8])
         if len(new_preferred_order) > 8: display_order += ", ..."
-        await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 팩 선호도 순서가 성공적으로 변경되었습니다:\n`{display_order}`", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message(f"✅ **{interaction.user.mention}** 님의 팩 선호도 순서가 성공적으로 변경되었습니다:\n`{display_order}`", ephemeral=True)
     else:
         logging.error(f"  - 사용자 '{target_user_name}' 프로필 업데이트 실패 (팩 선호도 변경).")
         # 실패 시 메모리 값 롤백
         target_user_profile.preferred_pack_order = old_order
-        await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 팩 선호도를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.", ephemeral=True)
+        if not debug_flag:
+            await interaction.response.send_message(f"❌ **{interaction.user.mention}** 님의 팩 선호도를 변경하는 중 오류가 발생했습니다. 파일 저장에 실패했습니다.", ephemeral=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
