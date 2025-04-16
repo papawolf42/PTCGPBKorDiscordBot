@@ -7,170 +7,35 @@ import re
 import math
 from discord.ext import commands
 from datetime import datetime, timedelta, timezone
-from GIST import FILE, TEXT, JSON, USER, SERVER
+import GIST
+import LOCAL
 
 MAIN_CHANNEL = os.getenv('DISCORD_MAIN_CHANNEL_ID')
 
 # 멤버 관련 설정
 ID   = "os.getenv('GIST_ID_1')"
 NAME = "Alliance"
-Member = JSON(ID, NAME)
+Member = GIST.JSON(ID, NAME)
 
 ID   = "os.getenv('GIST_ID_1')"
 NAME = "Admin"
-Admin = TEXT(ID, NAME)
+Admin = GIST.TEXT(ID, NAME)
 
 
 # 서버 설정 공간
 SERVER_DICT = {}
 
 ID   = "os.getenv('GIST_ID_2')"
-NAME = "Group1"
-Group1 = TEXT(ID, NAME, False)
-
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "GodPack1"
-GodPack1 = JSON(ID, NAME)
-
-ID      = os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')
-DETECT  = os.getenv('DISCORD_GROUP1_DETECT_ID')
-POSTING = os.getenv('DISCORD_GROUP1_POSTING_ID')
-COMMAND = os.getenv('DISCORD_GROUP1_COMMAND_ID')
-MUSEUM  = os.getenv('DISCORD_GROUP1_MUSEUM_ID')
-TAG = {
-        "Yet"    : os.getenv('DISCORD_GROUP1_TAG_YET'),
-        "Good"   : os.getenv('DISCORD_GROUP1_TAG_GOOD'),
-        "Bad"    : os.getenv('DISCORD_GROUP1_TAG_BAD'),
-        "1P"     : os.getenv('DISCORD_GROUP1_TAG_1P'),
-        "2P"     : os.getenv('DISCORD_GROUP1_TAG_2P'),
-        "3P"     : os.getenv('DISCORD_GROUP1_TAG_3P'),
-        "4P"     : os.getenv('DISCORD_GROUP1_TAG_4P'),
-        "5P"     : os.getenv('DISCORD_GROUP1_TAG_5P'),
-        "Notice" : os.getenv('DISCORD_GROUP1_TAG_NOTICE')
-}
-SERVER_DICT[ID] = SERVER(ID, Group1, GodPack1, DETECT, POSTING, COMMAND, MUSEUM, TAG)
-
-
-
-ID   = "os.getenv('GIST_ID_2')"
-NAME = "Group2"
-Group2 = TEXT(ID, NAME, False)
-
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "GodPack2"
-GodPack2 = JSON(ID, NAME)
-
-ID      = 1356566217187528804
-DETECT  = 1356566139039121408
-POSTING = 1356565996466339861
-COMMAND = 1356656481180848195
-MUSEUM  = 1356566293050036316
-TAG = {
-        "Yet"    : 1356632239622066489,
-        "Good"   : 1356632028526678108,
-        "Bad"    : 1356632066795765760,
-        "1P"     : 1356631731154980912,
-        "2P"     : 1356631845499961354,
-        "3P"     : 1356631886142898327,
-        "4P"     : 1356631923727798325,
-        "5P"     : 1356631984855711856,
-        "Notice" : 1356632159804461215
-}
-SERVER_DICT[ID] = SERVER(ID, Group2, GodPack2, DETECT, POSTING, COMMAND, MUSEUM, TAG)
-
-
-
-ID   = "os.getenv('GIST_ID_2')"
-NAME = "Group3"
-Group3 = TEXT(ID, NAME, False)
-
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "GodPack3"
-GodPack3 = JSON(ID, NAME)
-
-ID      = os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')
-DETECT  = os.getenv('DISCORD_GROUP3_DETECT_ID')
-POSTING = os.getenv('DISCORD_GROUP3_POSTING_ID')
-COMMAND = os.getenv('DISCORD_GROUP3_COMMAND_ID')
-MUSEUM  = os.getenv('DISCORD_GROUP3_MUSEUM_ID')
-TAG = {
-        "Yet"    : os.getenv('DISCORD_GROUP3_TAG_YET'),
-        "Good"   : os.getenv('DISCORD_GROUP3_TAG_GOOD'),
-        "Bad"    : os.getenv('DISCORD_GROUP3_TAG_BAD'),
-        "1P"     : os.getenv('DISCORD_GROUP3_TAG_1P'),
-        "2P"     : os.getenv('DISCORD_GROUP3_TAG_2P'),
-        "3P"     : os.getenv('DISCORD_GROUP3_TAG_3P'),
-        "4P"     : os.getenv('DISCORD_GROUP3_TAG_4P'),
-        "5P"     : os.getenv('DISCORD_GROUP3_TAG_5P'),
-        "Notice" : os.getenv('DISCORD_GROUP3_TAG_NOTICE')
-}
-SERVER_DICT[ID] = SERVER(ID, Group3, GodPack3, DETECT, POSTING, COMMAND, MUSEUM, TAG)
-
-
-
-ID   = "os.getenv('GIST_ID_2')"
-NAME = "Group4"
-Group4 = TEXT(ID, NAME, False)
-
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "GodPack4"
-GodPack4 = JSON(ID, NAME)
-
-ID      = 1358035181260242965
-DETECT  = 1358035153959649393
-POSTING = 1358035020354158663
-COMMAND = 1358035085722390658
-MUSEUM  = 1358035213845922033
-TAG = {
-        "Yet"    : 1358035845889786015,
-        "Good"   : 1358035893797126156,
-        "Bad"    : 1358035937040404642,
-        "1P"     : 1358035423171182703,
-        "2P"     : 1358035547217596467,
-        "3P"     : 1358035601127116873,
-        "4P"     : 1358035648568885379,
-        "5P"     : 1358035696652390610,
-        "Notice" : 1358035798854865048
-}
-SERVER_DICT[ID] = SERVER(ID, Group4, GodPack4, DETECT, POSTING, COMMAND, MUSEUM, TAG)
-
-
-
-ID   = "os.getenv('GIST_ID_2')"
-NAME = "Group5"
-Group5 = TEXT(ID, NAME, False)
-
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "GodPack5"
-GodPack5 = JSON(ID, NAME)
-
-ID      = 1358091689742438522
-DETECT  = 1358091656762753187
-POSTING = 1358091549329588254
-COMMAND = 1358091614114812194
-MUSEUM  = 1358091791936655500
-TAG = {
-        "Yet"    : 1358092190147936453,
-        "Good"   : 1358092163761705202,
-        "Bad"    : 1358092171605053547,
-        "1P"     : 1358092115107643512,
-        "2P"     : 1358092125006462976,
-        "3P"     : 1358092134103650314,
-        "4P"     : 1358092142668681388,
-        "5P"     : 1358092155230621928,
-        "Notice" : 1358092199740571828
-}
-SERVER_DICT[ID] = SERVER(ID, Group5, GodPack5, DETECT, POSTING, COMMAND, MUSEUM, TAG)
-
-
-
-ID   = "os.getenv('GIST_ID_2')"
 NAME = "Group6"
-Group6 = TEXT(ID, NAME, False)
+Group6 = GIST.TEXT(ID, NAME, False)
 
 ID   = "os.getenv('GIST_ID_3')"
 NAME = "GodPack6"
-GodPack6 = JSON(ID, NAME)
+GodPack6 = GIST.JSON(ID, NAME)
+
+ID   = "os.getenv('GIST_ID_3')"
+NAME = "Code6"
+GPTest6 = GIST.JSON(ID, NAME)
 
 ID      = os.getenv('DISCORD_GROUP6_HEARTBEAT_ID')
 DETECT  = os.getenv('DISCORD_GROUP6_DETECT_ID')
@@ -188,7 +53,7 @@ TAG = {
         "5P"     : os.getenv('DISCORD_GROUP6_TAG_5P'),
         "Notice" : os.getenv('DISCORD_GROUP6_TAG_NOTICE')
 }
-SERVER_DICT[ID] = SERVER(ID, Group6, GodPack6, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+SERVER_DICT[ID] = GIST.SERVER(ID, Group6, GodPack6, GPTest6, DETECT, POSTING, COMMAND, MUSEUM, TAG)
 
 
 #  봇 권한 설정
@@ -205,7 +70,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 USER_DICT = {}
 for name, code in Member.DATA.items():
-    USER_DICT[name] = USER(name, code)
+    USER_DICT[name] = GIST.USER(name, code)
     
     
 async def safe_send(channel, message, BLOCK=False):
@@ -285,7 +150,11 @@ async def recent_godpack(Server):
                             title, sub, save = Server.make_title(inform, formatted_time)
                             
                             if save not in Server.GODPACK.DATA :
-                                Server.GODPACK.edit('+', save, "Yet")    
+                                Server.GODPACK.edit('+', save, "Yet")
+                                if inform['code'] :
+                                    Server.GPTEST.edit('+', save, inform['code'])
+                                else :
+                                    Server.GPTEST.edit('+', save, 'NaN')
                 if "Valid" in message.content :
                     lines = message.content.split("\n")
                     if len(lines) > 3:
@@ -299,9 +168,14 @@ async def recent_godpack(Server):
                             
                             if save not in Server.GODPACK.DATA :
                                 Server.GODPACK.edit('+', save, "Yet")
+                                if inform['code'] :
+                                    Server.GPTEST.edit('+', save, inform['code'])
+                                else :
+                                    Server.GPTEST.edit('+', save, 'NaN')
 
         print(f"최근 {day}일 이내 감지된 레어팩 수: {detected_gp}개")
         Server.GODPACK.update()
+        Server.GPTEST.update()
         
     except Exception as e:
         print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
@@ -322,6 +196,7 @@ async def recent_online(Server):
         for message in messages:
             if "Online:" in message.content:
                 if message.created_at >= Threshold["Off"]:
+                    
                     name = message.content.split("\n")[0].strip()
                     if name in USER_DICT.keys():
                         if USER_DICT[name].CODE not in Server.FILE.DATA:
@@ -387,50 +262,6 @@ async def update_periodic():
                     await Server_Channel[ID].send(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
 
 
-async def delete_thread(Server):
-    while True:
-        await asyncio.sleep(60)
-        
-        forum_channel = await bot.fetch_channel(Server.POSTING)
-        
-        threads = forum_channel.threads
-        
-
-        async for thread in forum_channel.archived_threads(limit=100):
-            try:
-                if thread.archived:
-                    await thread.edit(archived=False)
-                    await asyncio.sleep(1)
-                threads.append(thread)
-            except Exception as e:
-                print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
-    
-        for thread in threads :
-            thread_tags_ids = [tag.id for tag in thread.applied_tags]
-            
-            now = datetime.now(timezone.utc)
-            if Server.FILE.NAME in ['Group4', 'Group5']:
-                one_week_ago = now - timedelta(hours=24)
-            else :
-                one_week_ago = now - timedelta(hours=24*7)
-            if Server.Tag["Bad"] in thread_tags_ids :
-                try :
-                    parts = thread.name.split()
-                    KST = timezone(timedelta(hours=9))
-                    time_str = f"{parts[7]} {parts[8]}"
-                    thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
-                except :
-                    thread_created_at = thread.created_at
-                
-                if thread_created_at < one_week_ago :
-                    try :
-                        print(f"{thread.name}이 삭제 됩니다.")
-                        await thread.delete()
-                        await asyncio.sleep(5)
-                    except Exception as e:
-                        print(f"{thread.name} 삭제에 실패했습니다", e)
-
-
 async def verify_periodic(Server):
     while True:
         await asyncio.sleep(120)
@@ -458,10 +289,7 @@ async def verify_periodic(Server):
             thread_tags_ids = [tag.id for tag in thread.applied_tags]
             
             now = datetime.now(timezone.utc)
-            if Server.FILE.NAME in ['Group4', 'Group5']:
-                one_week_ago = now - timedelta(hours=24)
-            else :
-                one_week_ago = now - timedelta(hours=24*7)
+            one_week_ago = now - timedelta(hours=24*7)
             if Server.Tag["Bad"] in thread_tags_ids :
                 try :
                     parts = thread.name.split()
@@ -475,7 +303,7 @@ async def verify_periodic(Server):
                     try :
                         print(f"{thread.name}이 삭제 됩니다.")
                         await thread.delete()
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(2)
                         threads.remove(thread)
                     except Exception as e:
                         print(f"{thread.name} 삭제에 실패했습니다", e)
@@ -499,12 +327,9 @@ async def verify_periodic(Server):
                 two_ago   = now - timedelta(hours=24)
                 three_ago = now - timedelta(hours=36)
                 
-                if Server.FILE.NAME in ['Group4', 'Group5']:
-                    time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
-                                      "4P" : two_ago, "5P" : two_ago}
-                else :
-                    time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
-                                      "4P" : three_ago, "5P" : three_ago}
+
+                time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
+                                  "4P" : three_ago, "5P" : three_ago}
                 
                 bad_threshold  = {"2P" : 5, "3P" : 8, "4P" : 11, "5P" : 14}
                 
@@ -540,7 +365,16 @@ async def verify_periodic(Server):
                     title_divide = thread.name.split()
                     pack = title_divide[5]
                     
-                    if no >= 3 and bad == 0 :
+                    if no + bad + good == 0 :
+                        if thread_created_at < one_ago :
+                            tag_id = Server.Tag["Bad"]
+                            bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
+                            THREAD_DICT["Bad"].append(thread)
+                            await thread.edit(applied_tags = [bad_tag])
+                        else :
+                            THREAD_DICT["Yet"].append(thread)
+                    
+                    elif no >= 3 and bad == 0 :
                         if thread_created_at < one_ago :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
@@ -584,7 +418,7 @@ async def verify_periodic(Server):
 
         
         yet_list = [text for text, verify in Server.GODPACK.DATA.items() if verify == 'Yet']
-        
+        yet_change = False
         for text in yet_list :
             parts = text.split()
             title = f"{parts[2]} {parts[3]} / {parts[4]} / {parts[5]} / {parts[0]} {parts[1]}"
@@ -594,6 +428,7 @@ async def verify_periodic(Server):
                 if title in [temp.name for temp in THREAD_DICT["Good"]] :
                     thread = next((temp for temp in THREAD_DICT["Good"] if title == temp.name), None)
                     Server.GODPACK.edit('+', text, "Good")
+                    yet_change = True
                     print(f"❗❗ {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
                     await alert_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
                     await main_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다. ({Server.FILE.NAME})")
@@ -604,7 +439,9 @@ async def verify_periodic(Server):
                         print(f"{title} 박물관 전시 실패! ", e)
                 
                 elif title in [temp.name for temp in THREAD_DICT["Bad"]] :
-                    Server.GODPACK.edit('+', text, "Bad") 
+                    Server.GODPACK.edit('+', text, "Bad")
+                    Server.GPTEST.edit('-', text, None)
+                    yet_change = True
                     print(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
                     await alert_channel.send(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
                 elif title in [temp.name for temp in THREAD_DICT["Error"]] :
@@ -646,8 +483,10 @@ async def verify_periodic(Server):
                         await Server.Post(forum_channel, images, inform, title)
                     except Exception as e:
                         print(f"{title} 포스팅 실패 : ", e)
-                    await asyncio.sleep(5)
-        Server.GODPACK.update()
+                    await asyncio.sleep(1)
+        if yet_change :
+            Server.GODPACK.update()
+            Server.GPTEST.update()
             
                         
 
@@ -659,7 +498,7 @@ async def on_ready():
         await recent_online(server)
     for server in SERVER_DICT.values():
         await recent_godpack(server)
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
     for server in SERVER_DICT.values():
         await recent_offline(server)
 
@@ -676,19 +515,6 @@ async def on_message(message):
             Server = SERVER_DICT[message.channel.id]
             name = message.content.split("\n")[0].strip()
             if name in USER_DICT.keys():
-                if Server.FILE.NAME == 'Group6':
-                    Group1_Server = SERVER_DICT[os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')]
-                    USER_DICT[name].called(Group1_Server, message)
-                    if USER_DICT[name].CODE not in Group1_Server.FILE.DATA:
-                        USER_DICT[name].online(Group1_Server)
-                        Group1_Server.FILE.update()
-                    
-                    Group3_Server = SERVER_DICT[os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')]
-                    USER_DICT[name].called(Group3_Server, message)
-                    if USER_DICT[name].CODE not in Group3_Server.FILE.DATA:
-                        USER_DICT[name].online(Group3_Server)
-                        Group3_Server.FILE.update()
-                        
                 USER_DICT[name].called(Server, message)
                 if USER_DICT[name].CODE not in Server.FILE.DATA:
                     print(f"✅ 수집된 이름: {name}, 코드 : {USER_DICT[name].CODE}")
@@ -719,15 +545,7 @@ async def on_message(message):
         for Server in SERVER_DICT.values():
             if message.channel.id == Server.DETECT:
                 break
-        """
-        if Server.FILE.NAME == 'Group1':
-            Another = SERVER_DICT[os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')]
-        elif Server.FILE.NAME == 'Group3':
-            Another = SERVER_DICT[os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')]
-        else :
-            Another = None
-        """
-        Another = None
+        
         if "Invalid" in message.content:
             print("Invalid God Pack 을 찾았습니다.")
             return
@@ -735,16 +553,11 @@ async def on_message(message):
         elif "found by" in message.content:
             print("Pseudo God Pack 을 찾았습니다.")
             inform, title = Server.found_Pseudo(message)
-            if Another :
-                inform_, title_ = Another.found_Pseudo(message)
             
             if inform and title :
                 images = message.attachments
                 forum_channel = bot.get_channel(Server.POSTING)
                 await Server.Post(forum_channel, images, inform, title)
-                if Another :
-                    forum_channel = bot.get_channel(Another.POSTING)
-                    await Another.Post(forum_channel, images, inform, title)
             else :
                 print("메시지에 오류가 있었습니다")
 
@@ -752,16 +565,11 @@ async def on_message(message):
         elif "Valid" in message.content :
             print("God Pack 을 찾았습니다!")
             inform, title = Server.found_GodPack(message)
-            if Another :
-                inform_, title_ = Another.found_GodPack(message)
             
             if inform and title :
                 images = message.attachments
                 forum_channel = bot.get_channel(Server.POSTING)
                 await Server.Post(forum_channel, images, inform, title)
-                if Another :
-                    forum_channel = bot.get_channel(Another.POSTING)
-                    await Another.Post(forum_channel, images, inform, title)
             else :
                 print("메시지에 오류가 있었습니다")
                 
@@ -1158,7 +966,7 @@ async def add(ctx, name, code):
     if str(ctx.author.id) in Admin.DATA:
         Member.edit('+', name, code)
         Member.update()
-        USER_DICT[name] = USER(name, code)
+        USER_DICT[name] = GIST.USER(name, code)
         print(f"Member 에서 새로운 ID를 갱신했습니다! : {name}")
         await ctx.send(f"Member에 {name} 추가 하였습니다.")
     
@@ -1253,16 +1061,17 @@ async def member(ctx):
 @bot.command()
 async def barracks(ctx):
     Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
-    
+
     if Server is None:
         await ctx.send("해당 명령어는 명령어 채널에 해주세요.")
         return
-
+    
     ID = Server.ID
     Barracks    = {user.NAME : user.inform[ID].get('BARRACKS', 0) for user in Server.ONLINE}
     Mode        = {user.NAME : user.inform[ID].get('TYPE', None) for user in Server.ONLINE}
     Rate        = {user.NAME : user.inform[ID].get('AVG', 0.0) for user in Server.ONLINE}
     Select      = {user.NAME : user.inform[ID].get('SELECT', 0.0) for user in Server.ONLINE}
+
     if Server.ONLINE:
         num_on = len(Barracks)
         Type = {3 : [], 5: [], None: []}
@@ -1271,17 +1080,22 @@ async def barracks(ctx):
         
         total_barracks = sum(Barracks.values())
         total_rate = sum(x for x in Rate.values() if not math.isnan(x))
-        
-        Expand = {}
-        for name, select in Select.items():
-            if not math.isnan(Rate[name]):
-                for ex in select:
-                    expand_rate = Rate[name]/len(select)
-                    if Expand.get(ex, None):
-                        Expand[ex] += expand_rate
-                    else :
-                        Expand[ex] = expand_rate
-        
+
+        try:
+            Expand = {}
+            for name, select in Select.items():
+                if not math.isnan(Rate[name]):
+                    for ex in select:
+                        expand_rate = Rate[name]/len(select)
+                        if Expand.get(ex, None):
+                            Expand[ex] += expand_rate
+                        else :
+                            Expand[ex] = expand_rate
+        except Exception as e:
+            print(name)
+            print(select)
+            print(e)
+            
         text = f"현재 온라인 상태 ({num_on}명, 총 {total_barracks} 배럭 {round(total_rate,2):<5}Packs/min):\n"
         for key, value in Expand.items():
             text = text + f'{key:<10} : {round(value,2):<6}\n'
@@ -1291,10 +1105,9 @@ async def barracks(ctx):
             text_dict[key] = "\n".join(Type[key])
             if Type[key] :
                 text = text + f"<{key} Pack>\n{text_dict[key]}\n\n"
-        
-        text = "```" + text + "```"
-        
-        await ctx.send(text)
+
+        await safe_send(ctx, text, True)
+
     else :
         await ctx.send(f"```현재 {Server.FILE.NAME}에 온라인 상태인 사람이 없습니다.```")
         

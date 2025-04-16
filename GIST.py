@@ -134,10 +134,11 @@ class JSON(FILE):
 
 
 class SERVER():
-    def __init__(self, ID, File, GodPack, Detect, Posting, Command, Museum, Tag):
+    def __init__(self, ID, File, GodPack, GPTest, Detect, Posting, Command, Museum, Tag):
         self.ID = ID
         self.FILE = File
         self.GODPACK = GodPack
+        self.GPTEST = GPTest
         self.ONLINE = set()
         self.WAITING = set()
         self.DETECT = Detect
@@ -174,6 +175,11 @@ class SERVER():
         else :
             self.GODPACK.edit('+', save, "Yet")
             self.GODPACK.update()
+            if inform['code'] :
+                self.GPTEST.edit('+', save, inform['code'])
+            else :
+                self.GPTEST.edit('+', save, 'NaN')
+            self.GPTEST.update()
             print("제목 : " + title)
             
         return inform, title
@@ -205,6 +211,11 @@ class SERVER():
         else :
             self.GODPACK.edit('+', save, "Yet")
             self.GODPACK.update()
+            if inform['code'] :
+                self.GPTEST.edit('+', save, inform['code'])
+            else :
+                self.GPTEST.edit('+', save, 'NaN')
+            self.GPTEST.update()
             print("제목 : " + title)
             
         return inform, title
@@ -410,7 +421,7 @@ class USER():
                 inform['BARRACKS'] =  len(numbers)
                 
             if 'Time' in line:
-                pattern = r"Time:\s*(\d+)m\s+Packs:\s*(\d+)\s*\|\s*Avg:\s*([\d.]+)\s*packs/min"
+                pattern = r'Time:\s*(\d+)m.*?Packs:\s*(\d+).*?Avg:\s*([\d.]+)'
                 match = re.search(pattern, line)
                 if match:
                     inform['RUNTIME'] = int(match.group(1))
@@ -430,6 +441,12 @@ class USER():
                 
             if 'Select' in line:
                 match = re.search(r"Select:\s*(.*)", line)
+                if match:
+                    content = match.group(1)
+                    inform['SELECT'] = [item.strip() for item in content.split(',') if item.strip()]
+                    
+            if 'Opening' in line:
+                match = re.search(r"Opening:\s*(.*)", line)
                 if match:
                     content = match.group(1)
                     inform['SELECT'] = [item.strip() for item in content.split(',') if item.strip()]
