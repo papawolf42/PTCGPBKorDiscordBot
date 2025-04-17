@@ -16,12 +16,12 @@ from discord.ext import commands # commands 임포트 추가
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 # --- 상수 정의 ---
-YOUR_TEST_SERVER_ID = os.getenv('DISCORD_SERVER_ID') # 실제 테스트 서버 ID
+YOUR_TEST_SERVER_ID = int(os.getenv('DISCORD_SERVER_ID')) # 실제 테스트 서버 ID
 
 
 # Heartbeat 관련 채널 (기존)
-GROUP1_CHANNEL_ID = os.getenv('DISCORD_GROUP1_HEARTBEAT_ID')
-GROUP3_CHANNEL_ID = os.getenv('DISCORD_GROUP3_HEARTBEAT_ID')
+GROUP1_CHANNEL_ID = int(os.getenv('DISCORD_GROUP1_HEARTBEAT_ID'))
+GROUP3_CHANNEL_ID = int(os.getenv('DISCORD_GROUP3_HEARTBEAT_ID'))
 HEARTBEAT_TARGET_CHANNEL_IDS = {GROUP1_CHANNEL_ID: "Group1", GROUP3_CHANNEL_ID: "Group3"} # 이름 변경: Heartbeat 채널임을 명시
 
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN') # 봇 토큰
@@ -83,10 +83,10 @@ GROUP_CONFIGS = [
     },
     {
         "NAME": "Group6",
-        "HEARTBEAT_ID": os.getenv('DISCORD_GROUP6_HEARTBEAT_ID'), # Heartbeat (예시, 실제 그룹 ID에 맞게 조정 필요)
+        "HEARTBEAT_ID": int(os.getenv('DISCORD_GROUP6_HEARTBEAT_ID')), # Heartbeat (예시, 실제 그룹 ID에 맞게 조정 필요)
         "DETECT_ID": os.getenv('DISCORD_GROUP6_DETECT_ID'), # GP webhook
         "POSTING_ID": os.getenv('DISCORD_GROUP6_POSTING_ID'),
-        "COMMAND_ID": 1356656481180848195, # Group6 COMMAND_ID 추가 (Poke3.py에 없음, Poke2.py 값 유지)
+        "COMMAND_ID": os.getenv('DISCORD_GROUP6_COMMAND_ID'),
         "MUSEUM_ID": os.getenv('DISCORD_GROUP6_MUSEUM_ID'),
         "TAGS": {
             "Yet": os.getenv('DISCORD_GROUP6_TAG_YET'),
@@ -484,8 +484,27 @@ def parse_heartbeat_message(content):
     if version_match: data['version'] = version_match.group(1).strip()
     type_match = re.search(r"^Type:\s*(.*?)\s*$", content, re.MULTILINE | re.IGNORECASE)
     if type_match: data['type'] = type_match.group(1).strip()
+
+    # --- Select/Opening 파싱 로직 수정 ---
     select_match = re.search(r"^Select:\s*(.*?)\s*$", content, re.MULTILINE | re.IGNORECASE)
-    if select_match: data['select'] = select_match.group(1).strip()
+    opening_match = re.search(r"^Opening:\s*(.*?)\s*$", content, re.MULTILINE | re.IGNORECASE)
+
+    select_value = select_match.group(1).strip() if select_match else None
+    opening_value = opening_match.group(1).strip() if opening_match else None
+
+    if select_value and opening_value:
+        # 둘 다 있으면 더 긴 값을 선택
+        data['select'] = opening_value if len(opening_value) >= len(select_value) else select_value
+        logging.debug(f"Heartbeat 파싱: Select와 Opening 모두 발견. 더 긴 값 선택: '{data['select']}'")
+    elif opening_value:
+        # Opening만 있으면 Opening 값 사용
+        data['select'] = opening_value
+    elif select_value:
+        # Select만 있으면 Select 값 사용
+        data['select'] = select_value
+    # 둘 다 없으면 기본값 'Unknown' 유지
+    # --- 파싱 로직 수정 끝 ---
+
     return data
 
 async def process_heartbeat_message(message, channel_id_str, channel_name):
