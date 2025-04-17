@@ -484,8 +484,27 @@ def parse_heartbeat_message(content):
     if version_match: data['version'] = version_match.group(1).strip()
     type_match = re.search(r"^Type:\s*(.*?)\s*$", content, re.MULTILINE | re.IGNORECASE)
     if type_match: data['type'] = type_match.group(1).strip()
+
+    # --- Select/Opening 파싱 로직 수정 ---
     select_match = re.search(r"^Select:\s*(.*?)\s*$", content, re.MULTILINE | re.IGNORECASE)
-    if select_match: data['select'] = select_match.group(1).strip()
+    opening_match = re.search(r"^Opening:\s*(.*?)\s*$", content, re.MULTILINE | re.IGNORECASE)
+
+    select_value = select_match.group(1).strip() if select_match else None
+    opening_value = opening_match.group(1).strip() if opening_match else None
+
+    if select_value and opening_value:
+        # 둘 다 있으면 더 긴 값을 선택
+        data['select'] = opening_value if len(opening_value) >= len(select_value) else select_value
+        logging.debug(f"Heartbeat 파싱: Select와 Opening 모두 발견. 더 긴 값 선택: '{data['select']}'")
+    elif opening_value:
+        # Opening만 있으면 Opening 값 사용
+        data['select'] = opening_value
+    elif select_value:
+        # Select만 있으면 Select 값 사용
+        data['select'] = select_value
+    # 둘 다 없으면 기본값 'Unknown' 유지
+    # --- 파싱 로직 수정 끝 ---
+
     return data
 
 async def process_heartbeat_message(message, channel_id_str, channel_name):
