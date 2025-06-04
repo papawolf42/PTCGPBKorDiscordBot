@@ -42,13 +42,14 @@
   - 백업 생성
 - **사용처**: `Poke2.py`, `Poke20.py`
 
-### LocalFileAdapter.py
-- **기능**: Gist → LocalFile 전환 어댑터
+### GISTAdapter.py ⭐ NEW
+- **기능**: GIST 인터페이스로 LocalFile 사용
 - **주요 기능**:
-  - Gist 인터페이스를 LocalFile로 변환
-  - 기존 코드 호환성 유지
-  - 마이그레이션 지원
-- **사용처**: 마이그레이션 중인 봇들
+  - GIST와 100% 동일한 인터페이스 제공
+  - 내부적으로 LocalFile 사용
+  - SERVER, USER 클래스 포함
+  - import 한 줄만 변경하여 전환 가능
+- **사용처**: `Poke.py` (GIST → LocalFile 전환됨)
 
 ## 의존성 관계
 ```

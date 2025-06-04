@@ -11,7 +11,8 @@ import os
 from dotenv import load_dotenv
 
 # 프로젝트 모듈 import
-from ..modules import GIST
+# from ..modules import GIST  # 기존 GIST 모듈
+from ..modules import GISTAdapter as GIST  # LocalFile을 사용하는 어댑터
 from ..modules.paths import ensure_directories
 
 # .env 파일에서 환경 변수 로드

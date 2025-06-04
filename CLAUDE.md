@@ -5,7 +5,7 @@
 
 ## 현재 아키텍처
 - **병렬 실행 구조**: 여러 봇이 동시에 실행되며 각자의 기능 담당
-  - `src/bots/Poke.py`: GitHub Gist 기반 초기 버전 (Group7, Group8)
+  - `src/bots/Poke.py`: ~~GitHub Gist 기반~~ → **로컬 파일 기반** (GISTAdapter 사용) (Group7, Group8)
   - `src/bots/Poke2.py`: 메인 갓팩 관리 봇 (파일 기반, 슬래시 명령어)
   - `src/bots/Poke20.py`: 20% 팩 전용 봇 (Poke2.py 기반)
   - `src/bots/Poke3.py`: 포럼 스레드 관리 특화 (Group1, Group3, Group6)
@@ -13,21 +13,27 @@
 
 ## 프로젝트 구조
 ```
-PTCGPBKorNew/
+PTCGPBKor/
 ├── src/
 │   ├── bots/        # 봇 실행 파일들
-│   ├── modules/     # 공통 모듈 (GIST, LocalFile 등)
+│   ├── modules/     # 공통 모듈 (GIST, LocalFile, GISTAdapter 등)
 │   └── utils/       # 유틸리티 함수
 ├── tests/           # 테스트 코드
 ├── scripts/         # 유틸리티 스크립트
 ├── docs/            # 프로젝트 문서
 ├── sessions/        # 작업 세션 기록
 └── data/            # 런타임 데이터 (git 제외)
+    └── poke_data/   # Poke.py 로컬 데이터 저장소
+        ├── common/  # 공통 데이터 (member.json, admin.txt)
+        ├── group7/  # Group7 데이터 (online.txt, godpack.json 등)
+        └── group8/  # Group8 데이터
 ```
 
 **📌 각 디렉토리에는 `CLAUDE.md` 파일이 있어 상세 정보를 제공합니다.**
 
-⚠️ **현재 상태**: 디렉토리 구조 재구성 완료, import 경로 수정 필요
+✅ **현재 상태**: 
+- 디렉토리 구조 재구성 완료
+- Poke.py의 GIST → LocalFile 전환 완료 (GISTAdapter 사용)
 
 ## 주요 문제점 및 개선 방향
 
@@ -51,9 +57,11 @@ PTCGPBKorNew/
 - **Heartbeat 데이터**: `data/heartbeat_data/` - 사용자 활동 추적
 - **사용자 프로필**: `data/user_data/` - 설정 및 정보
 - **친구 목록**: 
-  - Poke2.py: `data/raw/`
+  - Poke2.py, Poke20.py: `data/raw/`
   - Poke20.py: `data/raw/` (Old/New 구분) → `data/raw20/`로 변경 예정
-- **GitHub Gist**: 온라인 사용자, 갓팩 정보
+- **Poke.py 데이터**: `data/poke_data/` - 로컬 파일로 전환됨
+  - common/: member.json, admin.txt
+  - group7/, group8/: online.txt, godpack.json, godpackCode.json
 
 ## 주요 기능
 1. **사용자 모니터링**: Heartbeat로 온라인 상태, 배럭 수, 팩 선호도 추적
