@@ -2,34 +2,55 @@
 
 독립 실행 가능한 유틸리티 스크립트들이 위치한 디렉토리입니다.
 
-## 스크립트별 상세 정보
+## 디렉토리 구조
 
-### check_bot_status.py
-- **기능**: 봇 상태 및 데이터 파일 확인
-- **확인 항목**:
-  - 봇 프로세스 실행 여부
-  - 데이터 파일 무결성
-  - 최근 활동 시간
-  - 에러 로그 분석
-- **실행**: `python scripts/check_bot_status.py`
+```
+scripts/
+├── migration/           # 데이터 마이그레이션 관련
+│   ├── migrate_to_local.py
+│   ├── copy_to_test.py
+│   └── CLAUDE.md
+│
+├── monitoring/          # 상태 모니터링 관련
+│   ├── check_bot_status.py
+│   ├── check_gist_data.py
+│   └── CLAUDE.md
+│
+└── testing/            # 테스트 자동화 관련
+    ├── test_simulator.py
+    ├── test_cases/     # 개별 테스트 케이스
+    │   ├── __init__.py
+    │   └── CLAUDE.md
+    ├── results/        # 테스트 결과 저장
+    │   └── .gitkeep
+    └── CLAUDE.md
+```
 
-### check_gist_data.py
-- **기능**: GitHub Gist 데이터 확인 및 검증
-- **확인 항목**:
-  - Gist 접근 가능 여부
-  - 데이터 형식 검증
-  - 마지막 업데이트 시간
-  - 로컬 데이터와 동기화 상태
-- **실행**: `python scripts/check_gist_data.py`
+## 사용 가이드
 
-### migrate_to_local.py
-- **기능**: Gist → LocalFile 마이그레이션
-- **주요 작업**:
-  - Gist 데이터 백업
-  - 로컬 파일로 변환
-  - 데이터 검증
-  - 롤백 옵션 제공
-- **실행**: `python scripts/migrate_to_local.py --backup`
+### 마이그레이션
+```bash
+# Gist → 로컬 파일 전환
+python scripts/migration/migrate_to_local.py
+
+# 테스트 환경 데이터 복사
+python scripts/migration/copy_to_test.py
+```
+
+### 모니터링
+```bash
+# 봇 상태 확인
+python scripts/monitoring/check_bot_status.py
+
+# Gist 데이터 검증
+python scripts/monitoring/check_gist_data.py
+```
+
+### 테스트
+```bash
+# 자동화 테스트 실행
+python scripts/testing/test_simulator.py
+```
 
 ## 사용 시나리오
 1. **일일 점검**: `check_bot_status.py` 실행

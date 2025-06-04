@@ -30,6 +30,9 @@ Thumbs.db
 logs/
 *.log
 
+# Test results
+scripts/testing/results/*.json
+
 # Data directories (민감한 사용자 데이터)
 data/
 data_test/

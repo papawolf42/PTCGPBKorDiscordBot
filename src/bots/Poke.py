@@ -16,7 +16,13 @@ from ..modules import GISTAdapter as GIST  # LocalFile을 사용하는 어댑터
 from ..modules.paths import ensure_directories
 
 # .env 파일에서 환경 변수 로드
-load_dotenv()
+# TEST_MODE가 설정되어 있으면 .env.test 사용
+if os.getenv('TEST_MODE', 'false').lower() == 'true':
+    load_dotenv('.env.test')
+    print("[TEST MODE] Using .env.test configuration")
+else:
+    load_dotenv()
+    print("[PRODUCTION MODE] Using .env configuration")
 
 MAIN_CHANNEL = os.getenv('DISCORD_MAIN_CHANNEL_ID')
 
@@ -108,6 +114,19 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 USER_DICT = {}
 for name, code in Member.DATA.items():
     USER_DICT[name] = GIST.USER(name, code)
+
+@bot.event
+async def on_ready():
+    """봇이 Discord에 연결되었을 때 실행"""
+    print(f'[BOT READY] {bot.user} has connected to Discord!')
+    print(f'[BOT READY] Connected to {len(bot.guilds)} guild(s)')
+    
+    is_test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
+    if is_test_mode:
+        print(f'[TEST MODE] Running in test environment')
+        print(f'[TEST MODE] Monitoring channels:')
+        for server_id, server in SERVER_DICT.items():
+            print(f'  - {server.FILE.NAME}: HEARTBEAT={server.ID}, COMMAND={server.COMMAND}')
     
     
 async def safe_send(channel, message, BLOCK=False):
@@ -279,77 +298,80 @@ async def recent_offline(Server):
         print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
         
         
-async def update_periodic():
+async def do_update():
+    """온라인 상태 업데이트 수행 (테스트 명령어와 주기적 실행 공통)"""
     Server_Channel = {ID : await bot.fetch_channel(ID) for ID, Server in SERVER_DICT.items()}
-        
+    
+    RAW_GIST_DICT = {}
+    for ID, Server in SERVER_DICT.items() :
+        RAW_GIST_DICT[ID] = Server.FILE.fetch_raw()
+        for user in list(Server.WAITING) :
+            if user.CODE in RAW_GIST_DICT[ID] :
+                Server.WAITING.discard(user)
+                Server.ONLINE.add(user)
+                print(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
+                await Server_Channel[ID].send(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
+            else :
+                print(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
+                await Server_Channel[ID].send(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
+
+async def update_periodic():
+    """주기적으로 update 실행"""
     while True:
         await asyncio.sleep(30)
-            
-        RAW_GIST_DICT = {}
-        for ID, Server in SERVER_DICT.items() :
-            RAW_GIST_DICT[ID] = Server.FILE.fetch_raw()
-            for user in list(Server.WAITING) :
-                if user.CODE in RAW_GIST_DICT[ID] :
-                    Server.WAITING.discard(user)
-                    Server.ONLINE.add(user)
-                    print(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
-                    await Server_Channel[ID].send(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
-                else :
-                    print(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
-                    await Server_Channel[ID].send(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
+        await do_update()
 
 
-async def verify_periodic(Server):
-    while True:
-        await asyncio.sleep(120)
-        Server.Health = datetime.now(timezone.utc) + timedelta(hours=9)
+async def do_verify(Server):
+    """갓팩 검증 수행 (테스트 명령어와 주기적 실행 공통)"""
+    Server.Health = datetime.now(timezone.utc) + timedelta(hours=9)
+    
+    forum_channel = await bot.fetch_channel(Server.POSTING)
+    alert_channel = await bot.fetch_channel(Server.DETECT)
+    main_channel  = await bot.fetch_channel(MAIN_CHANNEL)
+    
+    threads = forum_channel.threads
+
+    forum_tags = forum_channel.available_tags
+
+    async for thread in forum_channel.archived_threads(limit=100):
+        try:
+            if thread.archived:
+                await thread.edit(archived=False)
+                await asyncio.sleep(1)
+            threads.append(thread)
+        except Exception as e:
+            print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
+    
         
-        forum_channel = await bot.fetch_channel(Server.POSTING)
-        alert_channel = await bot.fetch_channel(Server.DETECT)
-        main_channel  = await bot.fetch_channel(MAIN_CHANNEL)
+    for thread in threads.copy() :
+        thread_tags_ids = [tag.id for tag in thread.applied_tags]
         
-        threads = forum_channel.threads
-
-        forum_tags = forum_channel.available_tags
-
-        async for thread in forum_channel.archived_threads(limit=100):
-            try:
-                if thread.archived:
-                    await thread.edit(archived=False)
-                    await asyncio.sleep(1)
-                threads.append(thread)
-            except Exception as e:
-                print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
-        
-            
-        for thread in threads.copy() :
-            thread_tags_ids = [tag.id for tag in thread.applied_tags]
-            
-            now = datetime.now(timezone.utc)
-            one_week_ago = now - timedelta(hours=24*7)
-            if Server.Tag["Bad"] in thread_tags_ids :
+        now = datetime.now(timezone.utc)
+        one_week_ago = now - timedelta(hours=24*7)
+        if Server.Tag["Bad"] in thread_tags_ids :
+            try :
+                parts = thread.name.split()
+                KST = timezone(timedelta(hours=9))
+                time_str = f"{parts[7]} {parts[8]}"
+                thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+            except :
+                thread_created_at = thread.created_at
+                
+            if thread_created_at < one_week_ago :
                 try :
-                    parts = thread.name.split()
-                    KST = timezone(timedelta(hours=9))
-                    time_str = f"{parts[7]} {parts[8]}"
-                    thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
-                except :
-                    thread_created_at = thread.created_at
+                    print(f"{thread.name}이 삭제 됩니다.")
+                    await thread.delete()
+                    await asyncio.sleep(2)
+                    threads.remove(thread)
+                except Exception as e:
+                    print(f"{thread.name} 삭제에 실패했습니다", e)
                     
-                if thread_created_at < one_week_ago :
-                    try :
-                        print(f"{thread.name}이 삭제 됩니다.")
-                        await thread.delete()
-                        await asyncio.sleep(2)
-                        threads.remove(thread)
-                    except Exception as e:
-                        print(f"{thread.name} 삭제에 실패했습니다", e)
-                        
-            
-
-        THREAD_DICT = {"Yet":[], "Bad":[], "Good":[], "Notice":[], "Error":[]}
         
-        for thread in threads :
+
+    THREAD_DICT = {"Yet":[], "Bad":[], "Good":[], "Notice":[], "Error":[]}
+    
+    for thread in threads :
             thread_name = thread.name
             thread_tags = thread.applied_tags
             
@@ -454,44 +476,44 @@ async def verify_periodic(Server):
                 await alert_channel.send(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
 
         
-        yet_list = [text for text, verify in Server.GODPACK.DATA.items() if verify == 'Yet']
-        yet_change = False
-        for text in yet_list :
-            parts = text.split()
-            title = f"{parts[2]} {parts[3]} / {parts[4]} / {parts[5]} / {parts[0]} {parts[1]}"
-            if title in [temp.name for temp in THREAD_DICT["Yet"]] :
-                continue
+    yet_list = [text for text, verify in Server.GODPACK.DATA.items() if verify == 'Yet']
+    yet_change = False
+    for text in yet_list :
+        parts = text.split()
+        title = f"{parts[2]} {parts[3]} / {parts[4]} / {parts[5]} / {parts[0]} {parts[1]}"
+        if title in [temp.name for temp in THREAD_DICT["Yet"]] :
+            continue
+        else :
+            if title in [temp.name for temp in THREAD_DICT["Good"]] :
+                thread = next((temp for temp in THREAD_DICT["Good"] if title == temp.name), None)
+                Server.GODPACK.edit('+', text, "Good")
+                yet_change = True
+                print(f"❗❗ {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
+                await alert_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
+                await main_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다. ({Server.FILE.NAME})")
+                try:
+                    museum_channel = await bot.fetch_channel(Server.MUSEUM)
+                    await Server.post_museum(thread, museum_channel)
+                except Exception as e:
+                    print(f"{title} 박물관 전시 실패! ", e)
+            
+            elif title in [temp.name for temp in THREAD_DICT["Bad"]] :
+                Server.GODPACK.edit('+', text, "Bad")
+                Server.GPTEST.edit('-', text, None)
+                yet_change = True
+                print(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
+                await alert_channel.send(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
+            elif title in [temp.name for temp in THREAD_DICT["Error"]] :
+                print(f"❗❗ {parts[2]} {parts[3]} 에 오류가 있습니다.")
             else :
-                if title in [temp.name for temp in THREAD_DICT["Good"]] :
-                    thread = next((temp for temp in THREAD_DICT["Good"] if title == temp.name), None)
-                    Server.GODPACK.edit('+', text, "Good")
-                    yet_change = True
-                    print(f"❗❗ {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
-                    await alert_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
-                    await main_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다. ({Server.FILE.NAME})")
-                    try:
-                        museum_channel = await bot.fetch_channel(Server.MUSEUM)
-                        await Server.post_museum(thread, museum_channel)
-                    except Exception as e:
-                        print(f"{title} 박물관 전시 실패! ", e)
-                
-                elif title in [temp.name for temp in THREAD_DICT["Bad"]] :
-                    Server.GODPACK.edit('+', text, "Bad")
-                    Server.GPTEST.edit('-', text, None)
-                    yet_change = True
-                    print(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
-                    await alert_channel.send(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
-                elif title in [temp.name for temp in THREAD_DICT["Error"]] :
-                    print(f"❗❗ {parts[2]} {parts[3]} 에 오류가 있습니다.")
-                else :
-                    KST = timezone(timedelta(hours=9))
-                    timenow = datetime.now(KST)
+                KST = timezone(timedelta(hours=9))
+                timenow = datetime.now(KST)
 
-                    time_str = f"{parts[0]} {parts[1]}"
-                    parsed_time = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
-                    
-                    if abs(timenow - parsed_time) <= timedelta(minutes=10) :
-                        continue
+                time_str = f"{parts[0]} {parts[1]}"
+                parsed_time = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+                
+                if abs(timenow - parsed_time) <= timedelta(minutes=10) :
+                    continue
                     
                     print(f"⚠️{title} 포스트를 찾을 수 없습니다.")
                     await alert_channel.send(f"{title} 포스트를 찾을 수 없어 임시로 생성합니다.")
@@ -524,8 +546,12 @@ async def verify_periodic(Server):
         if yet_change :
             Server.GODPACK.update()
             Server.GPTEST.update()
-            
-                        
+
+async def verify_periodic(Server):
+    """주기적으로 verify 실행"""
+    while True:
+        await asyncio.sleep(120)
+        await do_verify(Server)
 
 @bot.event
 async def on_ready():
@@ -1153,6 +1179,50 @@ async def alive(ctx):
     for Server in SERVER_DICT.values():
         text = Server.Health.strftime("%Y.%m.%d %H:%M:%S")
         await ctx.send(f"```{Server.FILE.NAME}의 마지막 점검\n{text}```")
+
+# 테스트 전용 명령어들
+@bot.command()
+async def test_update(ctx):
+    """테스트: 온라인 상태 즉시 업데이트"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    await ctx.send("온라인 상태 업데이트 시작...")
+    await do_update()
+    await ctx.send("온라인 상태 업데이트 완료!")
+
+@bot.command()
+async def test_verify(ctx):
+    """테스트: 갓팩 검증 즉시 실행"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} 갓팩 검증 시작...")
+    await do_verify(Server)
+    await ctx.send(f"{Server.FILE.NAME} 갓팩 검증 완료!")
+
+@bot.command()
+async def test_offline(ctx):
+    """테스트: 오프라인 처리 즉시 실행"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} 오프라인 처리 시작...")
+    await recent_offline(Server)
+    await ctx.send(f"{Server.FILE.NAME} 오프라인 처리 완료!")
         
                 
     
@@ -1162,12 +1232,27 @@ async def main():
     # 필요한 디렉토리 생성 (Poke.py는 Gist를 사용하므로 로컬 디렉토리는 최소한만)
     ensure_directories()
     
+    # 테스트 모드에서 자동 종료 설정
+    is_test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
+    if is_test_mode:
+        test_duration = int(os.getenv('TEST_DURATION', '10'))  # 기본 10초
+        print(f"[TEST MODE] Bot will auto-shutdown after {test_duration} seconds")
+        asyncio.create_task(auto_shutdown(test_duration))
+    
     asyncio.create_task(update_periodic())
     
     for Server in SERVER_DICT.values() :
         asyncio.create_task(verify_periodic(Server))
     async with bot:
         await bot.start(DISCORD_TOKEN)
+
+async def auto_shutdown(duration):
+    """테스트 모드에서 지정된 시간 후 봇을 종료"""
+    await asyncio.sleep(duration)
+    print(f"[TEST MODE] Auto-shutdown after {duration} seconds")
+    await bot.close()
+    # 강제 종료를 위한 추가 조치
+    os._exit(0)
 
 if __name__ == "__main__":
     asyncio.run(main())

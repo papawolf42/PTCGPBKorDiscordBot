@@ -27,6 +27,10 @@
 ### 실행 가이드
 - `run_test.md`: 테스트 실행 방법
 
+### 테스트 문서
+- `poke_test_documentation.md`: Poke.py 기능 명세 및 테스트 가이드
+- `poke_simulation_test_plan.md`: 시뮬레이션 기반 단계별 테스트 계획
+
 ## 문서 작성 규칙
 1. 마크다운 형식 사용
 2. 명확한 제목과 섹션 구분
