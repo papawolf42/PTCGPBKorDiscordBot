@@ -29,7 +29,7 @@ class GISTAdapter:
         }
         
         folder, local_filename = mapping.get(filename, ("common", f"{filename}.txt"))
-        return TextAdapter(self.local_storage, folder, local_filename)
+        return TextAdapter(self.local_storage, folder, local_filename, name=filename)
     
     def JSON(self, gist_id, filename):
         """GIST.JSON과 동일한 인터페이스"""
@@ -43,7 +43,7 @@ class GISTAdapter:
         }
         
         folder, local_filename = mapping.get(filename, ("common", f"{filename}.json"))
-        return JsonAdapter(self.local_storage, folder, local_filename)
+        return JsonAdapter(self.local_storage, folder, local_filename, name=filename)
     
     def SERVER(self, *args):
         """GIST.SERVER와 동일한 인터페이스"""
@@ -61,12 +61,13 @@ class GISTAdapter:
 class TextAdapter:
     """GIST TEXT 클래스 어댑터"""
     
-    def __init__(self, storage, folder, filename):
+    def __init__(self, storage, folder, filename, name=None):
         self.storage = storage
         self.folder = folder
         self.filename = filename
         self.file_path = os.path.join(storage.base_path, folder, filename)
         self.DATA = set()
+        self.NAME = name  # GIST와의 호환성을 위해 추가
         self.load()
     
     def load(self):
@@ -109,12 +110,13 @@ class TextAdapter:
 class JsonAdapter:
     """GIST JSON 클래스 어댑터"""
     
-    def __init__(self, storage, folder, filename):
+    def __init__(self, storage, folder, filename, name=None):
         self.storage = storage
         self.folder = folder
         self.filename = filename
         self.file_path = os.path.join(storage.base_path, folder, filename)
         self.DATA = {}
+        self.NAME = name  # GIST와의 호환성을 위해 추가
         self.load()
     
     def load(self):

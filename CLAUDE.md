@@ -84,6 +84,11 @@ PTCGPBKor/
 3. 테스트 환경 구축 방법
 4. 코드 리팩토링 우선순위
 
+## 최근 수정사항 (2025-06-04)
+- **GISTAdapter 버그 수정**: TextAdapter와 JsonAdapter에 NAME 속성 추가
+  - 원인: GIST의 TEXT/JSON 클래스는 FILE 클래스를 상속받아 NAME 속성을 가지고 있었으나, Adapter에서는 누락됨
+  - 해결: `self.NAME = name` 추가로 `Server.FILE.NAME` 호환성 확보
+
 ## Claude Code 작업 가이드라인
 
 ### 📁 디렉토리별 CLAUDE.md 시스템
