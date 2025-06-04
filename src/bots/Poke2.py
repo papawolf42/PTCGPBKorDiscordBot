@@ -16,6 +16,9 @@ from dotenv import load_dotenv
 # .env 파일에서 환경 변수 로드
 load_dotenv()
 
+# 프로젝트 모듈 import
+from ..modules.paths import DATA_DIR, ensure_directories
+
 # --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
@@ -26,10 +29,9 @@ YOUR_TEST_SERVER_ID = int(os.getenv('DISCORD_SERVER_ID')) # 실제 테스트 서
 # Heartbeat 관련 채널 (기존)
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN') # 봇 토큰
 
-# DATA_PATH 환경변수 사용
-DATA_PATH = os.getenv('DATA_PATH', 'data')
-HEARTBEAT_DATA_DIR = os.path.join(DATA_PATH, "heartbeat_data") # 데이터 저장 폴더
-USER_DATA_DIR = os.path.join(DATA_PATH, "user_data") # 사용자 프로필 데이터 저장 폴더
+# 데이터 디렉토리 경로 정의
+HEARTBEAT_DATA_DIR = os.path.join(DATA_DIR, "heartbeat_data")
+USER_DATA_DIR = os.path.join(DATA_DIR, "user_data")
 USER_INFO_SOURCE_URL = os.getenv('PASTEBIN_URL') # 사용자 정보 소스 URL
 TARGET_BARRACKS_DEFAULT = 170 # 기본 목표 배럭 정의
 
@@ -851,7 +853,7 @@ async def generate_friend_list_files(added_by_map, user_profiles_for_gen):
     user_profiles_for_gen: { user_id_str: { ..., 'custom_target_barracks': int | None, 'pack_select': str, 'preferred_pack_order': list[str] } }
     added_by_map: { u_id_str: [v1_id_str, v2_id_str...] }
     """
-    raw_dir = os.path.join(DATA_PATH, "raw")
+    raw_dir = os.path.join(DATA_DIR, "raw")
     print(f"--- 친구 목록 파일 생성 시작 ({raw_dir}) ---")
     logging.debug(f"DEBUG: generate_friend_list_files 호출됨. user_profiles_for_gen 키: {list(user_profiles_for_gen.keys())}") # 전달된 프로필 키 확인
 
@@ -1570,6 +1572,9 @@ async def process_gp_result_message(message: discord.Message, group_config: dict
 
 async def main():
     """메인 실행 함수"""
+    # 필요한 디렉토리 생성
+    ensure_directories("heartbeat_data", "user_data", "raw")
+    
     try:
         async with bot:
             bot.loop.create_task(check_heartbeat_status())

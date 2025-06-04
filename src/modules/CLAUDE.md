@@ -4,6 +4,20 @@
 
 ## 모듈별 상세 정보
 
+### paths.py ⭐ NEW
+- **기능**: 프로젝트 경로 관리
+- **주요 기능**:
+  - 프로젝트 루트 자동 탐색 (CLAUDE.md 기준)
+  - 주요 디렉토리 경로 제공 (`PROJECT_ROOT`, `DATA_DIR`, `LOGS_DIR`)
+  - 디렉토리 생성 함수 (`ensure_directories()`)
+- **사용법**:
+  ```python
+  from ..modules.paths import DATA_DIR, ensure_directories
+  HEARTBEAT_DIR = os.path.join(DATA_DIR, "heartbeat_data")
+  ensure_directories("heartbeat_data", "user_data", "raw")
+  ```
+- **사용처**: 모든 봇 (경로 일관성 보장)
+
 ### GIST.py
 - **기능**: GitHub Gist API와의 통신
 - **주요 클래스/함수**:
@@ -38,8 +52,9 @@
 
 ## 의존성 관계
 ```
+paths.py ← 모든 봇 (경로 관리)
 GIST.py ← Poke.py
-GroupInfo.py ← 모든 봇
+GroupInfo.py ← 모든 봇 (그룹 설정)
 LocalFile.py ← Poke2.py, Poke20.py
 LocalFileAdapter.py ← 마이그레이션 테스트
 ```

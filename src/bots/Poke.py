@@ -9,7 +9,10 @@ from discord.ext import commands
 from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
-import GIST
+
+# 프로젝트 모듈 import
+from ..modules import GIST
+from ..modules.paths import ensure_directories
 
 # .env 파일에서 환경 변수 로드
 load_dotenv()
@@ -1155,6 +1158,9 @@ async def alive(ctx):
     
 
 async def main():
+    # 필요한 디렉토리 생성 (Poke.py는 Gist를 사용하므로 로컬 디렉토리는 최소한만)
+    ensure_directories()
+    
     asyncio.create_task(update_periodic())
     
     for Server in SERVER_DICT.values() :
