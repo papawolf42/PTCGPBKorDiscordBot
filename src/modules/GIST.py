@@ -7,12 +7,13 @@ import re
 import math
 import aiohttp
 import io
+import os
 from discord.ext import commands
 from datetime import datetime, timedelta
 
 
 
-GITHUB = {'USER' : "os.getenv('GITHUB_USER_ID')", 'TOKEN' : os.getenv('GITHUB_GIST_TOKEN')}
+GITHUB = {'USER' : os.getenv('GITHUB_USER_ID'), 'TOKEN' : os.getenv('GITHUB_GIST_TOKEN')}
 
         
 class FILE():

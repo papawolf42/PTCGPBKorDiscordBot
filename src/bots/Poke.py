@@ -7,17 +7,21 @@ import re
 import math
 from discord.ext import commands
 from datetime import datetime, timedelta, timezone
+import os
+from dotenv import load_dotenv
 import GIST
-import LOCAL
+
+# .env 파일에서 환경 변수 로드
+load_dotenv()
 
 MAIN_CHANNEL = os.getenv('DISCORD_MAIN_CHANNEL_ID')
 
 # 멤버 관련 설정
-ID   = "os.getenv('GIST_ID_1')"
+ID   = os.getenv('GIST_ID_1')
 NAME = "Alliance"
 Member = GIST.JSON(ID, NAME)
 
-ID   = "os.getenv('GIST_ID_1')"
+ID   = os.getenv('GIST_ID_1')
 NAME = "Admin"
 Admin = GIST.TEXT(ID, NAME)
 
@@ -25,37 +29,66 @@ Admin = GIST.TEXT(ID, NAME)
 # 서버 설정 공간
 SERVER_DICT = {}
 
-ID   = "os.getenv('GIST_ID_2')"
-NAME = "Group6"
-Group6 = GIST.TEXT(ID, NAME, False)
+ID   = os.getenv('GIST_ID_2')
+NAME = "Group7"
+Group7 = GIST.TEXT(ID, NAME, False)
 
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "GodPack6"
-GodPack6 = GIST.JSON(ID, NAME)
+ID   = os.getenv('GIST_ID_3')
+NAME = "GodPack7"
+GodPack7 = GIST.JSON(ID, NAME)
 
-ID   = "os.getenv('GIST_ID_3')"
-NAME = "Code6"
-GPTest6 = GIST.JSON(ID, NAME)
+ID   = os.getenv('GIST_ID_3')
+NAME = "Code7"
+GPTest7 = GIST.JSON(ID, NAME)
 
-ID      = os.getenv('DISCORD_GROUP6_HEARTBEAT_ID')
-DETECT  = os.getenv('DISCORD_GROUP6_DETECT_ID')
-POSTING = os.getenv('DISCORD_GROUP6_POSTING_ID')
-COMMAND = os.getenv('DISCORD_GROUP6_COMMAND_ID')
-MUSEUM  = os.getenv('DISCORD_GROUP6_MUSEUM_ID')
+ID      = int(os.getenv('DISCORD_GROUP7_HEARTBEAT_ID'))
+DETECT  = int(os.getenv('DISCORD_GROUP7_DETECT_ID'))
+POSTING = int(os.getenv('DISCORD_GROUP7_POSTING_ID'))
+COMMAND = int(os.getenv('DISCORD_GROUP7_COMMAND_ID'))
+MUSEUM  = int(os.getenv('DISCORD_GROUP7_MUSEUM_ID'))
 TAG = {
-        "Yet"    : os.getenv('DISCORD_GROUP6_TAG_YET'),
-        "Good"   : os.getenv('DISCORD_GROUP6_TAG_GOOD'),
-        "Bad"    : os.getenv('DISCORD_GROUP6_TAG_BAD'),
-        "1P"     : os.getenv('DISCORD_GROUP6_TAG_1P'),
-        "2P"     : os.getenv('DISCORD_GROUP6_TAG_2P'),
-        "3P"     : os.getenv('DISCORD_GROUP6_TAG_3P'),
-        "4P"     : os.getenv('DISCORD_GROUP6_TAG_4P'),
-        "5P"     : os.getenv('DISCORD_GROUP6_TAG_5P'),
-        "Notice" : os.getenv('DISCORD_GROUP6_TAG_NOTICE')
+        "Yet"    : int(os.getenv('DISCORD_GROUP7_TAG_YET')),
+        "Good"   : int(os.getenv('DISCORD_GROUP7_TAG_GOOD')),
+        "Bad"    : int(os.getenv('DISCORD_GROUP7_TAG_BAD')),
+        "1P"     : int(os.getenv('DISCORD_GROUP7_TAG_1P')),
+        "2P"     : int(os.getenv('DISCORD_GROUP7_TAG_2P')),
+        "3P"     : int(os.getenv('DISCORD_GROUP7_TAG_3P')),
+        "4P"     : int(os.getenv('DISCORD_GROUP7_TAG_4P')),
+        "5P"     : int(os.getenv('DISCORD_GROUP7_TAG_5P')),
+        "Notice" : int(os.getenv('DISCORD_GROUP7_TAG_NOTICE'))
 }
-SERVER_DICT[ID] = GIST.SERVER(ID, Group6, GodPack6, GPTest6, DETECT, POSTING, COMMAND, MUSEUM, TAG)
 
+SERVER_DICT[ID] = GIST.SERVER(ID, Group7, GodPack7, GPTest7, DETECT, POSTING, COMMAND, MUSEUM, TAG)
 
+ID   = os.getenv('GIST_ID_2')
+NAME = "Group8"
+Group8 = GIST.TEXT(ID, NAME, False)
+
+ID   = os.getenv('GIST_ID_3')
+NAME = "GodPack8"
+GodPack8 = GIST.JSON(ID, NAME)
+
+ID   = os.getenv('GIST_ID_3')
+NAME = "Code8"
+GPTest8 = GIST.JSON(ID, NAME)
+
+ID      = int(os.getenv('DISCORD_GROUP8_HEARTBEAT_ID'))
+DETECT  = int(os.getenv('DISCORD_GROUP8_DETECT_ID'))
+POSTING = int(os.getenv('DISCORD_GROUP8_POSTING_ID'))
+COMMAND = int(os.getenv('DISCORD_GROUP8_COMMAND_ID'))
+MUSEUM  = int(os.getenv('DISCORD_GROUP8_MUSEUM_ID'))
+TAG = {
+        "Yet"    : int(os.getenv('DISCORD_GROUP8_TAG_YET')),
+        "Good"   : int(os.getenv('DISCORD_GROUP8_TAG_GOOD')),
+        "Bad"    : int(os.getenv('DISCORD_GROUP8_TAG_BAD')),
+        "1P"     : int(os.getenv('DISCORD_GROUP8_TAG_1P')),
+        "2P"     : int(os.getenv('DISCORD_GROUP8_TAG_2P')),
+        "3P"     : int(os.getenv('DISCORD_GROUP8_TAG_3P')),
+        "4P"     : int(os.getenv('DISCORD_GROUP8_TAG_4P')),
+        "5P"     : int(os.getenv('DISCORD_GROUP8_TAG_5P')),
+        "Notice" : int(os.getenv('DISCORD_GROUP8_TAG_NOTICE'))
+}
+SERVER_DICT[ID] = GIST.SERVER(ID, Group8, GodPack8, GPTest8, DETECT, POSTING, COMMAND, MUSEUM, TAG)
 #  봇 권한 설정
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
