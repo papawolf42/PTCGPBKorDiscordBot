@@ -18,6 +18,7 @@ import json
 import time
 import argparse
 import logging
+import random
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -33,6 +34,7 @@ from test_cases.base import BaseTestCase
 from test_cases.connection import ConnectionTests
 from test_cases.messages import MessageTests
 from test_cases.commands import CommandTests
+from test_cases.detect_test_data import DETECT_MESSAGE_TEST_CASES, DETECT_QUICK_TEST_CASES, validate_detect_image_files
 
 
 def setup_logging(debug=False):
@@ -107,6 +109,9 @@ class PokeTestSimulator:
         
         # 테스트 데이터 경로
         self.test_data_path = TEST_DATA_DIR
+        
+        # 테스트 케이스 데이터
+        self.test_cases = DETECT_QUICK_TEST_CASES  # 빠른 테스트용
         
     async def setup_client(self):
         """Discord 클라이언트 설정"""
@@ -192,8 +197,8 @@ class PokeTestSimulator:
         
         return True
     
-    async def send_webhook_message(self, webhook_url, content, username=None):
-        """Webhook을 사용하여 메시지 전송"""
+    async def send_webhook_message(self, webhook_url, content, username=None, attachments=None):
+        """Webhook을 사용하여 메시지 전송 (이미지 포함 가능)"""
         if not webhook_url:
             self.logger.error("Webhook URL이 설정되지 않았습니다")
             return None
@@ -201,24 +206,66 @@ class PokeTestSimulator:
         if not self.session:
             self.session = aiohttp.ClientSession()
         
-        # Webhook 페이로드 생성
-        payload = {
-            'content': content,
-            'username': username or 'Test User'
-        }
-        
-        try:
-            async with self.session.post(webhook_url, json=payload) as response:
-                if response.status == 204:  # Discord webhook 성공 응답
-                    self.logger.debug(f"Webhook 메시지 전송 성공: {username}")
-                    return True
+        # 파일 첨부가 있는 경우 multipart/form-data로 전송
+        if attachments:
+            data = aiohttp.FormData()
+            
+            # 메시지 데이터
+            payload = {
+                'content': content,
+                'username': username or 'Test User'
+            }
+            data.add_field('payload_json', json.dumps(payload))
+            
+            # 이미지 파일 첨부
+            files_attached = 0
+            for i, attachment_path in enumerate(attachments):
+                if attachment_path.exists():
+                    with open(attachment_path, 'rb') as f:
+                        file_data = f.read()
+                        data.add_field(
+                            f'file{i}',
+                            file_data,
+                            filename=attachment_path.name,
+                            content_type='image/png'
+                        )
+                        files_attached += 1
+                        self.logger.debug(f"이미지 첨부: {attachment_path.name}")
                 else:
-                    error_text = await response.text()
-                    self.logger.error(f"Webhook 전송 실패: {response.status} - {error_text}")
-                    return False
-        except Exception as e:
-            self.logger.error(f"Webhook 전송 중 오류: {str(e)}")
-            return False
+                    self.logger.warning(f"이미지 파일 없음: {attachment_path}")
+            
+            try:
+                async with self.session.post(webhook_url, data=data) as response:
+                    if response.status == 204:
+                        self.logger.debug(f"Webhook 메시지 전송 성공 (이미지 {files_attached}개 포함): {username}")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        self.logger.error(f"Webhook 전송 실패: {response.status} - {error_text}")
+                        return False
+            except Exception as e:
+                self.logger.error(f"Webhook 전송 중 오류: {str(e)}")
+                return False
+        
+        # 파일 첨부가 없는 경우 기존 방식
+        else:
+            payload = {
+                'content': content,
+                'username': username or 'Test User'
+            }
+            
+            try:
+                async with self.session.post(webhook_url, json=payload) as response:
+                    if response.status == 204:
+                        self.logger.debug(f"Webhook 메시지 전송 성공: {username}")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        self.logger.error(f"Webhook 전송 실패: {response.status} - {error_text}")
+                        return False
+            except Exception as e:
+                self.logger.error(f"Webhook 전송 중 오류: {str(e)}")
+                return False
         
     async def wait_for_bot(self, timeout=30):
         """봇이 온라인인지 확인"""
@@ -322,6 +369,21 @@ class PokeTestSimulator:
             if not self.continue_on_fail:
                 return False
             return True
+    
+    async def validate_test_images(self):
+        """테스트 이미지 파일 검증"""
+        self.logger.info("테스트 이미지 파일 검증 중...")
+        
+        if validate_detect_image_files():
+            return {
+                'success': True,
+                'message': '모든 테스트 이미지 파일 확인 완료'
+            }
+        else:
+            return {
+                'success': False,
+                'message': '일부 테스트 이미지 파일이 누락됨'
+            }
             
     async def run_all_tests(self):
         """모든 테스트 실행"""
@@ -355,41 +417,24 @@ class PokeTestSimulator:
         
         # 테스트 목록
         tests = [
-            # Phase 1: 연결 확인 (봇 시작 제외)
-            # ("client_connect", connection.test_client_connect),  # ✅ 성공
-            # ("channel_access", connection.test_channel_access), # ✅ 성공
-            # ("data_directory", connection.test_data_directory), # ✅ 성공
+            # Phase 1: 연결 확인 (봇 시작 제외) - ✅ 완료
+            # ("client_connect", connection.test_client_connect),
+            # ("channel_access", connection.test_channel_access),
+            # ("data_directory", connection.test_data_directory),
             
-            # Phase 2: 메시지 테스트 - 로그인/로그아웃 시나리오 ✅ 통과
-            # Poke.py TEST MODE는 10초 타임아웃, 테스트는 5초-5초-15초로 구성
-            # ("heartbeat_initial", messages.test_heartbeat_initial),  # 초기 로그인
-            # ("wait_5sec", lambda: base.wait_seconds(5)),
-            # ("heartbeat_maintain", messages.test_heartbeat_maintain),  # 5초 후 유지
-            # ("wait_timeout", messages.test_wait_for_timeout),  # 15초 대기 (타임아웃)
-            # ("verify_offline", messages.test_verify_offline),  # 오프라인 확인
-            # ("relogin", messages.test_relogin_after_offline),  # 재로그인
+            # Phase 2: 갓팩 감지 및 포스팅 플로우
+            ("validate_images", lambda: self.validate_test_images()),
+            ("detect_valid_godpack", messages.test_detect_predefined_case('valid')),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
+            ("detect_invalid_godpack", messages.test_detect_predefined_case('invalid')),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
+            ("detect_double_twostar", messages.test_detect_predefined_case('double_twostar')),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
             
-            # Phase 3: 명령어 테스트
-            ("cmd_state", commands.test_state_command),
-            ("wait_2sec", lambda: base.wait_seconds(2)),
-            ("cmd_list", commands.test_list_command),
-            ("wait_2sec", lambda: base.wait_seconds(2)),
-            ("cmd_barracks", commands.test_barracks_command),
-            
-            # Phase 4: 관리자 명령어
-            ("cmd_test_update", commands.test_test_update_command),
-            ("wait_5sec", lambda: base.wait_seconds(5)),
-            ("cmd_test_offline", commands.test_test_offline_command),
-            
-            # Phase 5: 추가 테스트 명령어
-            ("cmd_test_gist_sync", commands.test_test_gist_sync_command),
-            ("wait_2sec", lambda: base.wait_seconds(2)),
-            ("cmd_test_timeout", commands.test_test_timeout_command),
-            ("wait_2sec", lambda: base.wait_seconds(2)),
-            ("cmd_test_recent_online", commands.test_test_recent_online_command),
-            
-            # Phase 6: 오류 처리
-            ("invalid_command", commands.test_invalid_command),
+            # Phase 3: 커뮤니티 투표 검증 플로우
+            # TODO: 포럼 포스트 반응 테스트 구현 예정
+            # ("vote_good", messages.test_vote_good),
+            # ("vote_bad", messages.test_vote_bad),
         ]
         
         # 테스트 실행

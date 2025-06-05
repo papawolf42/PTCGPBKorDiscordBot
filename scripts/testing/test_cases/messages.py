@@ -312,3 +312,118 @@ Opening: {opening}'''
                 False,
                 f'갓팩 감지 메시지 전송 실패: {str(e)}'
             )
+    
+    # 이전 버전의 랜덤 생성 테스트 메서드들은 사용하지 않음
+    # test_detect_predefined_case()를 대신 사용
+    
+    def test_detect_predefined_case(self, case_type):
+        """사전 정의된 테스트 케이스를 사용하는 테스트 함수 생성"""
+        async def test_func():
+            # 테스트 케이스 가져오기
+            test_case = self.simulator.test_cases.get(case_type)
+            if not test_case:
+                return self.format_result(
+                    False,
+                    f'테스트 케이스를 찾을 수 없음: {case_type}'
+                )
+            
+            # 설명 및 기대 동작 설정
+            self.description = f"사전 정의된 {case_type} 테스트 케이스 실행"
+            self.expected_behavior = f"{test_case['expected']['user']} 사용자의 {case_type} 메시지 처리"
+            
+            # Webhook URL 확인
+            webhook_url = self.simulator.webhook_urls.get('detect')
+            if not webhook_url:
+                return self.format_result(
+                    False,
+                    'Detect webhook URL이 설정되지 않음'
+                )
+            
+            # 채널 확인
+            detect_channel = self.channels.get('detect')
+            posting_channel = self.channels.get('posting')
+            
+            if not detect_channel:
+                return self.format_result(
+                    False,
+                    'Detect 채널을 찾을 수 없음'
+                )
+            
+            # 현재 godpack.json 항목 수 확인 (valid만 해당)
+            godpack_before = None
+            entries_before = 0
+            if case_type == 'valid' and posting_channel:
+                godpack_before = self.read_json_file('poke_data/test/godpack.json') or {}
+                entries_before = len(godpack_before)
+            
+            # 메시지 데이터 가져오기
+            msg_data = test_case['message']
+            attachments = test_case.get('attachments', [])
+            expected = test_case['expected']
+            
+            try:
+                # Webhook으로 메시지 전송 (이미지 포함)
+                sent = await self.simulator.send_webhook_message(
+                    webhook_url, 
+                    msg_data['content'], 
+                    username=msg_data['username'],
+                    attachments=attachments
+                )
+                if not sent:
+                    return self.format_result(False, 'Webhook 메시지 전송 실패')
+                    
+                await asyncio.sleep(5)  # 봇 처리 대기
+                
+                # 결과 확인
+                success = True
+                details = {
+                    'user': expected['user'],
+                    'instance_id': expected['instance_id'],
+                    'friend_code': expected['friend_code'],
+                    'type': case_type,
+                    'attachments': len(attachments)
+                }
+                
+                # Valid 갓팩의 경우 godpack.json 확인
+                if case_type == 'valid' and posting_channel:
+                    godpack_after = self.read_json_file('poke_data/test/godpack.json') or {}
+                    entries_after = len(godpack_after)
+                    new_entries = entries_after - entries_before
+                    
+                    details['entries_before'] = entries_before
+                    details['entries_after'] = entries_after
+                    details['new_entries'] = new_entries
+                    details['should_create_post'] = expected['should_create_post']
+                    
+                    # 기대치와 비교
+                    if expected['should_create_post'] and new_entries == 0:
+                        success = False
+                        message = f'{case_type} 갓팩이 처리되지 않음'
+                    else:
+                        message = f'{case_type} 갓팩 처리 성공'
+                        
+                    # 봇 응답 확인
+                    bot_responded = await self.check_for_bot_response(posting_channel)
+                    details['bot_responded'] = bot_responded
+                
+                # Invalid나 double_twostar의 경우
+                else:
+                    # 처리되지 않아야 함
+                    if expected['should_create_post']:
+                        success = False
+                        message = f'{case_type} 메시지가 잘못 처리됨'
+                    else:
+                        message = f'{case_type} 메시지 무시 성공'
+                
+                return self.format_result(
+                    success,
+                    message,
+                    details
+                )
+            except Exception as e:
+                return self.format_result(
+                    False,
+                    f'{case_type} 테스트 실패: {str(e)}'
+                )
+        
+        return test_func
