@@ -51,13 +51,12 @@ def setup_logging():
 # 로거 초기화
 logger = setup_logging()
 
-# TEST_MODE 확인 및 추가 환경 변수 로드
-# (PROJECT_ROOT는 이미 위에서 로드됨)
-if os.getenv('TEST_MODE', 'false').lower() == 'true':
-    load_dotenv('.env.test', override=True)  # .env.test의 값으로 덮어쓰기
-    logger.info("[TEST MODE] Using .env.test configuration")
+# TEST_MODE 확인
+TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
+if TEST_MODE:
+    logger.info("[TEST MODE] Using test configuration")
 else:
-    logger.info("[PRODUCTION MODE] Using .env configuration")
+    logger.info("[PRODUCTION MODE] Using production configuration")
 
 MAIN_CHANNEL = os.getenv('DISCORD_MAIN_CHANNEL_ID')
 
@@ -70,70 +69,104 @@ ID   = os.getenv('GIST_ID_1')
 NAME = "Admin"
 Admin = GIST.TEXT(ID, NAME)
 
-
 # 서버 설정 공간
 SERVER_DICT = {}
 
-ID   = os.getenv('GIST_ID_2')
-NAME = "Group7"
-Group7 = GIST.TEXT(ID, NAME, False)
-
-ID   = os.getenv('GIST_ID_3')
-NAME = "GodPack7"
-GodPack7 = GIST.JSON(ID, NAME)
-
-ID   = os.getenv('GIST_ID_3')
-NAME = "Code7"
-GPTest7 = GIST.JSON(ID, NAME)
-
-ID      = int(os.getenv('DISCORD_GROUP7_HEARTBEAT_ID'))
-DETECT  = int(os.getenv('DISCORD_GROUP7_DETECT_ID'))
-POSTING = int(os.getenv('DISCORD_GROUP7_POSTING_ID'))
-COMMAND = int(os.getenv('DISCORD_GROUP7_COMMAND_ID'))
-MUSEUM  = int(os.getenv('DISCORD_GROUP7_MUSEUM_ID'))
-TAG = {
-        "Yet"    : int(os.getenv('DISCORD_GROUP7_TAG_YET')),
-        "Good"   : int(os.getenv('DISCORD_GROUP7_TAG_GOOD')),
-        "Bad"    : int(os.getenv('DISCORD_GROUP7_TAG_BAD')),
-        "1P"     : int(os.getenv('DISCORD_GROUP7_TAG_1P')),
-        "2P"     : int(os.getenv('DISCORD_GROUP7_TAG_2P')),
-        "3P"     : int(os.getenv('DISCORD_GROUP7_TAG_3P')),
-        "4P"     : int(os.getenv('DISCORD_GROUP7_TAG_4P')),
-        "5P"     : int(os.getenv('DISCORD_GROUP7_TAG_5P')),
-        "Notice" : int(os.getenv('DISCORD_GROUP7_TAG_NOTICE'))
-}
-
-SERVER_DICT[ID] = GIST.SERVER(ID, Group7, GodPack7, GPTest7, DETECT, POSTING, COMMAND, MUSEUM, TAG)
-
-ID   = os.getenv('GIST_ID_2')
-NAME = "Group8"
-Group8 = GIST.TEXT(ID, NAME, False)
-
-ID   = os.getenv('GIST_ID_3')
-NAME = "GodPack8"
-GodPack8 = GIST.JSON(ID, NAME)
-
-ID   = os.getenv('GIST_ID_3')
-NAME = "Code8"
-GPTest8 = GIST.JSON(ID, NAME)
-
-ID      = int(os.getenv('DISCORD_GROUP8_HEARTBEAT_ID'))
-DETECT  = int(os.getenv('DISCORD_GROUP8_DETECT_ID'))
-POSTING = int(os.getenv('DISCORD_GROUP8_POSTING_ID'))
-COMMAND = int(os.getenv('DISCORD_GROUP8_COMMAND_ID'))
-MUSEUM  = int(os.getenv('DISCORD_GROUP8_MUSEUM_ID'))
-TAG = {
-        "Yet"    : int(os.getenv('DISCORD_GROUP8_TAG_YET')),
-        "Good"   : int(os.getenv('DISCORD_GROUP8_TAG_GOOD')),
-        "Bad"    : int(os.getenv('DISCORD_GROUP8_TAG_BAD')),
-        "1P"     : int(os.getenv('DISCORD_GROUP8_TAG_1P')),
-        "2P"     : int(os.getenv('DISCORD_GROUP8_TAG_2P')),
-        "3P"     : int(os.getenv('DISCORD_GROUP8_TAG_3P')),
-        "4P"     : int(os.getenv('DISCORD_GROUP8_TAG_4P')),
-        "5P"     : int(os.getenv('DISCORD_GROUP8_TAG_5P')),
-        "Notice" : int(os.getenv('DISCORD_GROUP8_TAG_NOTICE'))
-}
-SERVER_DICT[ID] = GIST.SERVER(ID, Group8, GodPack8, GPTest8, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+if TEST_MODE:
+    # TEST MODE: TEST 그룹 하나만 사용
+    ID   = os.getenv('GIST_ID_2')
+    NAME = "TestGroup"
+    TestGroup = GIST.TEXT(ID, NAME, False)
+    
+    ID   = os.getenv('GIST_ID_3')
+    NAME = "TestGodPack"
+    TestGodPack = GIST.JSON(ID, NAME)
+    
+    ID   = os.getenv('GIST_ID_3')
+    NAME = "TestCode"
+    TestGPCode = GIST.JSON(ID, NAME)
+    
+    ID      = int(os.getenv('DISCORD_TEST_HEARTBEAT_ID'))
+    DETECT  = int(os.getenv('DISCORD_TEST_DETECT_ID'))
+    POSTING = int(os.getenv('DISCORD_TEST_POSTING_ID'))
+    COMMAND = int(os.getenv('DISCORD_TEST_COMMAND_ID'))
+    MUSEUM  = int(os.getenv('DISCORD_TEST_MUSEUM_ID'))
+    TAG = {
+            "Yet"    : int(os.getenv('DISCORD_TEST_TAG_YET')),
+            "Good"   : int(os.getenv('DISCORD_TEST_TAG_GOOD')),
+            "Bad"    : int(os.getenv('DISCORD_TEST_TAG_BAD')),
+            "1P"     : int(os.getenv('DISCORD_TEST_TAG_1P')),
+            "2P"     : int(os.getenv('DISCORD_TEST_TAG_2P')),
+            "3P"     : int(os.getenv('DISCORD_TEST_TAG_3P')),
+            "4P"     : int(os.getenv('DISCORD_TEST_TAG_4P')),
+            "5P"     : int(os.getenv('DISCORD_TEST_TAG_5P')),
+            "Notice" : int(os.getenv('DISCORD_TEST_TAG_NOTICE'))
+    }
+    
+    SERVER_DICT[ID] = GIST.SERVER(ID, TestGroup, TestGodPack, TestGPCode, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+    
+else:
+    # PRODUCTION MODE: GROUP7과 GROUP8 사용
+    ID   = os.getenv('GIST_ID_2')
+    NAME = "Group7"
+    Group7 = GIST.TEXT(ID, NAME, False)
+    
+    ID   = os.getenv('GIST_ID_3')
+    NAME = "GodPack7"
+    GodPack7 = GIST.JSON(ID, NAME)
+    
+    ID   = os.getenv('GIST_ID_3')
+    NAME = "Code7"
+    GPTest7 = GIST.JSON(ID, NAME)
+    
+    ID      = int(os.getenv('DISCORD_GROUP7_HEARTBEAT_ID'))
+    DETECT  = int(os.getenv('DISCORD_GROUP7_DETECT_ID'))
+    POSTING = int(os.getenv('DISCORD_GROUP7_POSTING_ID'))
+    COMMAND = int(os.getenv('DISCORD_GROUP7_COMMAND_ID'))
+    MUSEUM  = int(os.getenv('DISCORD_GROUP7_MUSEUM_ID'))
+    TAG = {
+            "Yet"    : int(os.getenv('DISCORD_GROUP7_TAG_YET')),
+            "Good"   : int(os.getenv('DISCORD_GROUP7_TAG_GOOD')),
+            "Bad"    : int(os.getenv('DISCORD_GROUP7_TAG_BAD')),
+            "1P"     : int(os.getenv('DISCORD_GROUP7_TAG_1P')),
+            "2P"     : int(os.getenv('DISCORD_GROUP7_TAG_2P')),
+            "3P"     : int(os.getenv('DISCORD_GROUP7_TAG_3P')),
+            "4P"     : int(os.getenv('DISCORD_GROUP7_TAG_4P')),
+            "5P"     : int(os.getenv('DISCORD_GROUP7_TAG_5P')),
+            "Notice" : int(os.getenv('DISCORD_GROUP7_TAG_NOTICE'))
+    }
+    
+    SERVER_DICT[ID] = GIST.SERVER(ID, Group7, GodPack7, GPTest7, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+    
+    ID   = os.getenv('GIST_ID_2')
+    NAME = "Group8"
+    Group8 = GIST.TEXT(ID, NAME, False)
+    
+    ID   = os.getenv('GIST_ID_3')
+    NAME = "GodPack8"
+    GodPack8 = GIST.JSON(ID, NAME)
+    
+    ID   = os.getenv('GIST_ID_3')
+    NAME = "Code8"
+    GPTest8 = GIST.JSON(ID, NAME)
+    
+    ID      = int(os.getenv('DISCORD_GROUP8_HEARTBEAT_ID'))
+    DETECT  = int(os.getenv('DISCORD_GROUP8_DETECT_ID'))
+    POSTING = int(os.getenv('DISCORD_GROUP8_POSTING_ID'))
+    COMMAND = int(os.getenv('DISCORD_GROUP8_COMMAND_ID'))
+    MUSEUM  = int(os.getenv('DISCORD_GROUP8_MUSEUM_ID'))
+    TAG = {
+            "Yet"    : int(os.getenv('DISCORD_GROUP8_TAG_YET')),
+            "Good"   : int(os.getenv('DISCORD_GROUP8_TAG_GOOD')),
+            "Bad"    : int(os.getenv('DISCORD_GROUP8_TAG_BAD')),
+            "1P"     : int(os.getenv('DISCORD_GROUP8_TAG_1P')),
+            "2P"     : int(os.getenv('DISCORD_GROUP8_TAG_2P')),
+            "3P"     : int(os.getenv('DISCORD_GROUP8_TAG_3P')),
+            "4P"     : int(os.getenv('DISCORD_GROUP8_TAG_4P')),
+            "5P"     : int(os.getenv('DISCORD_GROUP8_TAG_5P')),
+            "Notice" : int(os.getenv('DISCORD_GROUP8_TAG_NOTICE'))
+    }
+    SERVER_DICT[ID] = GIST.SERVER(ID, Group8, GodPack8, GPTest8, DETECT, POSTING, COMMAND, MUSEUM, TAG)
 #  봇 권한 설정
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
@@ -275,8 +308,13 @@ async def recent_godpack(Server):
 async def recent_online(Server):
     now = datetime.now(timezone.utc)
     
-    Threshold = {'Off' : now - timedelta(minutes=15),
-                 'Rest': now - timedelta(hours=24*7)}
+    # TEST_MODE일 때는 10초 타임아웃 사용
+    if TEST_MODE:
+        Threshold = {'Off' : now - timedelta(seconds=10),
+                     'Rest': now - timedelta(hours=24*7)}
+    else:
+        Threshold = {'Off' : now - timedelta(minutes=15),
+                     'Rest': now - timedelta(hours=24*7)}
 
     channel = await bot.fetch_channel(Server.ID)
     
@@ -311,8 +349,13 @@ async def recent_online(Server):
 async def recent_offline(Server):
     now = datetime.now(timezone.utc)
     
-    Threshold = {'Off' : now - timedelta(minutes=15),
-                 'Rest': now - timedelta(hours=24*7)}
+    # TEST_MODE일 때는 10초 타임아웃 사용
+    if TEST_MODE:
+        Threshold = {'Off' : now - timedelta(seconds=10),
+                     'Rest': now - timedelta(hours=24*7)}
+    else:
+        Threshold = {'Off' : now - timedelta(minutes=15),
+                     'Rest': now - timedelta(hours=24*7)}
 
     channel = await bot.fetch_channel(Server.ID)
     
@@ -626,7 +669,9 @@ async def on_message(message):
             
             try :
                 now = datetime.now(timezone.utc)
-                remove = [user for user in Server.ONLINE if now - user.inform[Server.ID]['TIME'] >= timedelta(minutes=15)]
+                # TEST_MODE일 때는 10초 타임아웃 사용
+                timeout = timedelta(seconds=10) if TEST_MODE else timedelta(minutes=15)
+                remove = [user for user in Server.ONLINE if now - user.inform[Server.ID]['TIME'] >= timeout]
                 
                 if remove :
                     for user in remove :
@@ -1270,7 +1315,7 @@ async def main():
     # 테스트 모드에서 자동 종료 설정
     is_test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
     if is_test_mode:
-        test_duration = int(os.getenv('TEST_DURATION', '10'))  # 기본 10초
+        test_duration = int(os.getenv('TEST_DURATION', '1000')) 
         logger.info(f"[TEST MODE] Bot will auto-shutdown after {test_duration} seconds")
         asyncio.create_task(auto_shutdown(test_duration))
     

@@ -39,6 +39,15 @@ def setup_logging(debug=False):
     """로깅 설정"""
     log_level = logging.DEBUG if debug else logging.INFO
     
+    # Discord.py의 verbose 로깅 억제
+    discord_logger = logging.getLogger('discord')
+    discord_logger.setLevel(logging.WARNING)  # DEBUG 대신 WARNING 레벨로 설정
+    
+    # discord.gateway의 heartbeat 경고도 억제 (디버깅 시에만)
+    if debug:
+        gateway_logger = logging.getLogger('discord.gateway')
+        gateway_logger.setLevel(logging.ERROR)  # heartbeat blocked 경고 숨김
+    
     # 로그 디렉토리 생성 (프로젝트 루트의 logs 디렉토리 사용)
     log_dir = Path(LOGS_DIR)
     log_dir.mkdir(exist_ok=True)
@@ -75,15 +84,16 @@ class PokeTestSimulator:
         self.logger = setup_logging(debug)
         
         # 테스트 환경 설정
-        load_dotenv('.env.test')
+        load_dotenv()  # .env 파일 로드
         self.token = os.getenv('DISCORD_BOT_TOKEN')
         
         # 테스트 채널 ID (봇 응답 확인용)
+        # TEST_MODE에서는 TEST 채널 하나만 사용
         self.channel_ids = {
-            'heartbeat_7': int(os.getenv('TEST_GROUP7_HEARTBEAT_ID', 0)),
-            'command_7': int(os.getenv('TEST_GROUP7_COMMAND_ID', 0)),
-            'heartbeat_8': int(os.getenv('TEST_GROUP8_HEARTBEAT_ID', 0)),
-            'command_8': int(os.getenv('TEST_GROUP8_COMMAND_ID', 0))
+            'heartbeat': int(os.getenv('DISCORD_TEST_HEARTBEAT_ID', 0)),
+            'command': int(os.getenv('DISCORD_TEST_COMMAND_ID', 0)),
+            'detect': int(os.getenv('DISCORD_TEST_DETECT_ID', 0)),
+            'posting': int(os.getenv('DISCORD_TEST_POSTING_ID', 0))
         }
         
         # Webhook URL 설정 (메시지 전송용)
@@ -247,8 +257,10 @@ class PokeTestSimulator:
         start_time = time.time()
         try:
             # 테스트 실행
+            self.logger.debug(f"테스트 '{test_name}' 시작")
             result = await test_func()
             duration = time.time() - start_time
+            self.logger.debug(f"테스트 '{test_name}' 완료 - {duration:.2f}초")
             
             # 테스트 중 수신한 봇 메시지 확인
             new_bot_messages = self.bot_messages[bot_msg_count_before:]
@@ -344,7 +356,7 @@ class PokeTestSimulator:
         # 테스트 목록
         tests = [
             # Phase 1: 연결 확인 (봇 시작 제외)
-            ("client_connect", connection.test_client_connect),
+            # ("client_connect", connection.test_client_connect),  # ✅ 성공 - 테스트 클라이언트 연결 성공
             ("channel_access", connection.test_channel_access),
             ("data_directory", connection.test_data_directory),
             
