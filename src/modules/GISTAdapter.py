@@ -17,7 +17,19 @@ class GISTAdapter:
     """GIST 클래스와 동일한 인터페이스를 제공하는 어댑터"""
     
     def __init__(self):
-        self.local_storage = LocalFile(base_path=get_data_path("poke_data"))
+        # TEST_MODE 확인
+        import os
+        is_test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
+        
+        # TEST_MODE일 때는 data_test 사용
+        if is_test_mode:
+            from .paths import TEST_DATA_DIR
+            base_path = os.path.join(TEST_DATA_DIR, "poke_data")
+        else:
+            base_path = get_data_path("poke_data")
+            
+        # LocalFile 인스턴스 생성
+        self.local_storage = LocalFile(base_path=base_path)
     
     def TEXT(self, gist_id, filename, initial=True):
         """GIST.TEXT와 동일한 인터페이스"""
@@ -26,10 +38,12 @@ class GISTAdapter:
             "Admin": ("common", "admin.txt"),
             "Group7": ("group7", "online.txt"),
             "Group8": ("group8", "online.txt"),
+            # TEST_MODE 매핑
+            "GroupTest": ("test", "online.txt"),
         }
         
         folder, local_filename = mapping.get(filename, ("common", f"{filename}.txt"))
-        return TextAdapter(self.local_storage, folder, local_filename, name=filename)
+        return TextAdapter(self.local_storage, folder, local_filename, name=filename, initial=initial)
     
     def JSON(self, gist_id, filename):
         """GIST.JSON과 동일한 인터페이스"""
@@ -40,6 +54,9 @@ class GISTAdapter:
             "Code7": ("group7", "godpackCode.json"),
             "GodPack8": ("group8", "godpack.json"),
             "Code8": ("group8", "godpackCode.json"),
+            # TEST_MODE 매핑
+            "GodPackTest": ("test", "godpack.json"),
+            "CodeTest": ("test", "godpackCode.json"),
         }
         
         folder, local_filename = mapping.get(filename, ("common", f"{filename}.json"))
@@ -61,14 +78,17 @@ class GISTAdapter:
 class TextAdapter:
     """GIST TEXT 클래스 어댑터"""
     
-    def __init__(self, storage, folder, filename, name=None):
+    def __init__(self, storage, folder, filename, name=None, initial=True):
         self.storage = storage
         self.folder = folder
         self.filename = filename
         self.file_path = os.path.join(storage.base_path, folder, filename)
         self.DATA = set()
         self.NAME = name  # GIST와의 호환성을 위해 추가
-        self.load()
+        # GIST와 동일한 동작: initial=True일 때만 파일 로드
+        if initial:
+            self.load()
+        # initial=False면 빈 set으로 시작
     
     def load(self):
         """파일에서 데이터 로드"""

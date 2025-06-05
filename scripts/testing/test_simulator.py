@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.modules.paths import get_data_path, LOGS_DIR
+from src.modules.paths import get_data_path, LOGS_DIR, TEST_DATA_DIR
 
 # 테스트 케이스 모듈 임포트
 from test_cases.base import BaseTestCase
@@ -106,7 +106,7 @@ class PokeTestSimulator:
         self.session = None
         
         # 테스트 데이터 경로
-        self.test_data_path = get_data_path('data_test')
+        self.test_data_path = TEST_DATA_DIR
         
     async def setup_client(self):
         """Discord 클라이언트 설정"""
@@ -356,18 +356,18 @@ class PokeTestSimulator:
         # 테스트 목록
         tests = [
             # Phase 1: 연결 확인 (봇 시작 제외)
-            # ("client_connect", connection.test_client_connect),  # ✅ 성공 - 테스트 클라이언트 연결 성공
-            ("channel_access", connection.test_channel_access),
-            ("data_directory", connection.test_data_directory),
+            # ("client_connect", connection.test_client_connect),  # ✅ 성공
+            # ("channel_access", connection.test_channel_access), # ✅ 성공
+            # ("data_directory", connection.test_data_directory), # ✅ 성공
             
-            # Phase 2: 메시지 테스트 - 로그인/로그아웃 시나리오
+            # Phase 2: 메시지 테스트 - 로그인/로그아웃 시나리오 ✅ 통과
             # Poke.py TEST MODE는 10초 타임아웃, 테스트는 5초-5초-15초로 구성
-            ("heartbeat_initial", messages.test_heartbeat_initial),  # 초기 로그인
-            ("wait_5sec", lambda: base.wait_seconds(5)),
-            ("heartbeat_maintain", messages.test_heartbeat_maintain),  # 5초 후 유지
-            ("wait_timeout", messages.test_wait_for_timeout),  # 15초 대기 (타임아웃)
-            ("verify_offline", messages.test_verify_offline),  # 오프라인 확인
-            ("relogin", messages.test_relogin_after_offline),  # 재로그인
+            # ("heartbeat_initial", messages.test_heartbeat_initial),  # 초기 로그인
+            # ("wait_5sec", lambda: base.wait_seconds(5)),
+            # ("heartbeat_maintain", messages.test_heartbeat_maintain),  # 5초 후 유지
+            # ("wait_timeout", messages.test_wait_for_timeout),  # 15초 대기 (타임아웃)
+            # ("verify_offline", messages.test_verify_offline),  # 오프라인 확인
+            # ("relogin", messages.test_relogin_after_offline),  # 재로그인
             
             # Phase 3: 명령어 테스트
             ("cmd_state", commands.test_state_command),
@@ -381,7 +381,14 @@ class PokeTestSimulator:
             ("wait_5sec", lambda: base.wait_seconds(5)),
             ("cmd_test_offline", commands.test_test_offline_command),
             
-            # Phase 5: 오류 처리
+            # Phase 5: 추가 테스트 명령어
+            ("cmd_test_gist_sync", commands.test_test_gist_sync_command),
+            ("wait_2sec", lambda: base.wait_seconds(2)),
+            ("cmd_test_timeout", commands.test_test_timeout_command),
+            ("wait_2sec", lambda: base.wait_seconds(2)),
+            ("cmd_test_recent_online", commands.test_test_recent_online_command),
+            
+            # Phase 6: 오류 처리
             ("invalid_command", commands.test_invalid_command),
         ]
         

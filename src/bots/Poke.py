@@ -75,16 +75,16 @@ SERVER_DICT = {}
 if TEST_MODE:
     # TEST MODE: TEST 그룹 하나만 사용
     ID   = os.getenv('GIST_ID_2')
-    NAME = "TestGroup"
-    TestGroup = GIST.TEXT(ID, NAME, False)
+    NAME = "GroupTest"
+    GroupTest = GIST.TEXT(ID, NAME, False)
     
     ID   = os.getenv('GIST_ID_3')
-    NAME = "TestGodPack"
-    TestGodPack = GIST.JSON(ID, NAME)
+    NAME = "GodPackTest"
+    GodPackTest = GIST.JSON(ID, NAME)
     
     ID   = os.getenv('GIST_ID_3')
-    NAME = "TestCode"
-    TestGPCode = GIST.JSON(ID, NAME)
+    NAME = "CodeTest"
+    CodeTest = GIST.JSON(ID, NAME)
     
     ID      = int(os.getenv('DISCORD_TEST_HEARTBEAT_ID'))
     DETECT  = int(os.getenv('DISCORD_TEST_DETECT_ID'))
@@ -103,7 +103,7 @@ if TEST_MODE:
             "Notice" : int(os.getenv('DISCORD_TEST_TAG_NOTICE'))
     }
     
-    SERVER_DICT[ID] = GIST.SERVER(ID, TestGroup, TestGodPack, TestGPCode, DETECT, POSTING, COMMAND, MUSEUM, TAG)
+    SERVER_DICT[ID] = GIST.SERVER(ID, GroupTest, GodPackTest, CodeTest, DETECT, POSTING, COMMAND, MUSEUM, TAG)
     
 else:
     # PRODUCTION MODE: GROUP7과 GROUP8 사용
@@ -378,8 +378,25 @@ async def recent_offline(Server):
         
 async def do_update():
     """온라인 상태 업데이트 수행 (테스트 명령어와 주기적 실행 공통)"""
+    logger.info(f"[PERIODIC] do_update 실행 - {datetime.now().strftime('%H:%M:%S')}")
     Server_Channel = {ID : await bot.fetch_channel(ID) for ID, Server in SERVER_DICT.items()}
     
+    # 타임아웃 체크 추가
+    now = datetime.now(timezone.utc)
+    timeout = timedelta(seconds=10) if TEST_MODE else timedelta(minutes=15)
+    
+    for ID, Server in SERVER_DICT.items():
+        # 타임아웃된 사용자 확인
+        remove = [user for user in Server.ONLINE if now - user.inform[Server.ID]['TIME'] >= timeout]
+        
+        if remove:
+            for user in remove:
+                user.offline(Server)
+                logger.info(f"[TIMEOUT] {user.NAME} 님이 OFF-LINE 되었습니다.")
+                Server.FILE.update()
+                await Server_Channel[ID].send(f"{user.NAME} 님이 OFF-LINE 되었습니다.")
+    
+    # 기존 WAITING → ONLINE 처리
     RAW_GIST_DICT = {}
     for ID, Server in SERVER_DICT.items() :
         RAW_GIST_DICT[ID] = Server.FILE.fetch_raw()
@@ -395,8 +412,11 @@ async def do_update():
 
 async def update_periodic():
     """주기적으로 update 실행"""
+    # TEST_MODE일 때는 5초, 일반 모드는 30초
+    sleep_time = 5 if TEST_MODE else 30
+    logger.info(f"update_periodic 시작 {sleep_time}초 주기로 실행")
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(sleep_time)
         await do_update()
 
 
@@ -666,22 +686,6 @@ async def on_message(message):
                 
             else :
                 await message.channel.send(f"{name} 은 ID 목록에 없습니다.")
-            
-            try :
-                now = datetime.now(timezone.utc)
-                # TEST_MODE일 때는 10초 타임아웃 사용
-                timeout = timedelta(seconds=10) if TEST_MODE else timedelta(minutes=15)
-                remove = [user for user in Server.ONLINE if now - user.inform[Server.ID]['TIME'] >= timeout]
-                
-                if remove :
-                    for user in remove :
-                        user.offline(Server)
-                        logger.info(f"{user.NAME} 님이 OFF-LINE 되었습니다.")
-                        Server.FILE.update()
-                        await message.channel.send(f"{user.NAME} 님이 OFF-LINE 되었습니다.")
-                        
-            except Exception as e:
-                logger.error(f"❌ 오류 발생: {e}")
     
     
     if message.channel.id in [Server.DETECT for Server in SERVER_DICT.values()] :
@@ -1303,6 +1307,141 @@ async def test_offline(ctx):
     await ctx.send(f"{Server.FILE.NAME} 오프라인 처리 시작...")
     await recent_offline(Server)
     await ctx.send(f"{Server.FILE.NAME} 오프라인 처리 완료!")
+
+@bot.command()
+async def test_recent_online(ctx):
+    """테스트: recent_online 함수 실행"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} recent_online 시작...")
+    await recent_online(Server)
+    await ctx.send(f"{Server.FILE.NAME} recent_online 완료! Server.ONLINE: {len(Server.ONLINE)}명")
+
+@bot.command()
+async def test_recent_godpack(ctx):
+    """테스트: recent_godpack 함수 실행"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} recent_godpack 시작...")
+    await recent_godpack(Server)
+    await ctx.send(f"{Server.FILE.NAME} recent_godpack 완료!")
+
+@bot.command()
+async def test_timeout(ctx):
+    """테스트: 타임아웃 체크 즉시 실행"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} 타임아웃 체크 시작...")
+    
+    # do_update의 타임아웃 체크 부분만 실행
+    now = datetime.now(timezone.utc)
+    timeout_duration = timedelta(seconds=10) if TEST_MODE else timedelta(minutes=15)
+    
+    remove = []
+    for user in Server.ONLINE:
+        if now - user.inform[Server.ID]['TIME'] >= timeout_duration:
+            remove.append(user)
+            logger.info(f"⏰ {user.NAME}님이 타임아웃으로 오프라인 처리됩니다.")
+    
+    for user in remove:
+        user.offline(Server)
+    
+    if remove:
+        Server.FILE.update()
+        await ctx.send(f"타임아웃으로 {len(remove)}명이 오프라인 처리되었습니다.")
+    else:
+        await ctx.send("타임아웃된 사용자가 없습니다.")
+
+@bot.command()
+async def test_gist_sync(ctx):
+    """테스트: GIST 동기화 상태 확인"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} GIST 동기화 상태 확인 중...")
+    
+    # WAITING과 ONLINE 상태 확인
+    raw_data = Server.FILE.fetch_raw()
+    
+    embed = discord.Embed(title=f"{Server.FILE.NAME} 동기화 상태", color=discord.Color.blue())
+    embed.add_field(name="Server.FILE.DATA", value=f"{len(Server.FILE.DATA)}명", inline=True)
+    embed.add_field(name="GIST 파일", value=f"{len(raw_data)}명", inline=True)
+    embed.add_field(name="Server.ONLINE", value=f"{len(Server.ONLINE)}명", inline=True)
+    embed.add_field(name="Server.WAITING", value=f"{len(Server.WAITING)}명", inline=True)
+    
+    # 동기화 차이 확인
+    in_file_not_online = Server.FILE.DATA - {user.CODE for user in Server.ONLINE}
+    if in_file_not_online:
+        embed.add_field(name="파일에만 있음", value=f"{len(in_file_not_online)}명", inline=False)
+    
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def test_clean_forum(ctx):
+    """테스트: 포럼 정리 작업 실행"""
+    if str(ctx.author.id) not in Admin.DATA:
+        await ctx.send("관리자 권한이 필요합니다.")
+        return
+    
+    Server = next((S for S in SERVER_DICT.values() if ctx.channel.id == S.COMMAND), None)
+    if Server is None:
+        await ctx.send("해당 명령어는 명령어 채널에서 실행해주세요.")
+        return
+    
+    await ctx.send(f"{Server.FILE.NAME} 포럼 정리 시작...")
+    
+    # do_verify의 포럼 정리 부분만 실행
+    forum_channel = await bot.fetch_channel(Server.POSTING)
+    threads = forum_channel.threads
+    
+    deleted_count = 0
+    now = datetime.now(timezone.utc)
+    one_week_ago = now - timedelta(hours=24*7)
+    
+    for thread in threads.copy():
+        thread_tags_ids = [tag.id for tag in thread.applied_tags]
+        
+        if Server.Tag["Bad"] in thread_tags_ids:
+            try:
+                parts = thread.name.split()
+                KST = timezone(timedelta(hours=9))
+                time_str = f"{parts[7]} {parts[8]}"
+                thread_created_at = datetime.strptime(time_str, "%Y.%m.%d %H:%M").replace(tzinfo=KST)
+            except:
+                thread_created_at = thread.created_at
+                
+            if thread_created_at < one_week_ago:
+                deleted_count += 1
+                logger.info(f"삭제 예정: {thread.name}")
+    
+    await ctx.send(f"1주일 이상된 Bad 태그 스레드: {deleted_count}개 발견")
         
                 
     

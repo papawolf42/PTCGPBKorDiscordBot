@@ -12,11 +12,11 @@ class CommandTests(BaseTestCase):
     
     async def test_state_command(self):
         """!state 명령어 테스트"""
-        channel = self.channels.get('command_7')
+        channel = self.channels.get('command')
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Command 채널을 찾을 수 없음'
+                'Command 채널을 찾을 수 없음'
             )
         
         try:
@@ -54,11 +54,11 @@ class CommandTests(BaseTestCase):
     
     async def test_list_command(self):
         """!list 명령어 테스트"""
-        channel = self.channels.get('command_7')
+        channel = self.channels.get('command')
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Command 채널을 찾을 수 없음'
+                'Command 채널을 찾을 수 없음'
             )
         
         try:
@@ -104,11 +104,11 @@ class CommandTests(BaseTestCase):
     
     async def test_barracks_command(self):
         """!barracks 명령어 테스트"""
-        channel = self.channels.get('command_7')
+        channel = self.channels.get('command')
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Command 채널을 찾을 수 없음'
+                'Command 채널을 찾을 수 없음'
             )
         
         try:
@@ -141,16 +141,16 @@ class CommandTests(BaseTestCase):
     
     async def test_test_update_command(self):
         """!test_update 명령어 테스트 (관리자 전용)"""
-        channel = self.channels.get('command_7')
+        channel = self.channels.get('command')
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Command 채널을 찾을 수 없음'
+                'Command 채널을 찾을 수 없음'
             )
         
         try:
             # 초기 온라인 수 확인
-            initial_online = self.read_file_content('poke_data/group7/online.txt')
+            initial_online = self.read_file_content('poke_data/test/online.txt')
             
             # 명령어 전송
             command_msg = await channel.send("!test_update")
@@ -184,11 +184,11 @@ class CommandTests(BaseTestCase):
     
     async def test_test_offline_command(self):
         """!test_offline 명령어 테스트 (관리자 전용)"""
-        channel = self.channels.get('command_7')
+        channel = self.channels.get('command')
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Command 채널을 찾을 수 없음'
+                'Command 채널을 찾을 수 없음'
             )
         
         try:
@@ -221,11 +221,11 @@ class CommandTests(BaseTestCase):
     
     async def test_invalid_command(self):
         """존재하지 않는 명령어 테스트"""
-        channel = self.channels.get('command_7')
+        channel = self.channels.get('command')
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Command 채널을 찾을 수 없음'
+                'Command 채널을 찾을 수 없음'
             )
         
         try:

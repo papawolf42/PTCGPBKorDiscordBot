@@ -54,11 +54,13 @@ Opening: {opening}'''
             )
         
         # 채널 확인 (봇 응답 확인용)
-        channel = self.channels.get('heartbeat_7')
+        # TEST_MODE에서는 'heartbeat' 채널만 사용
+        channel_key = 'heartbeat'
+        channel = self.channels.get(channel_key)
         if not channel:
             return self.format_result(
                 False,
-                'Group7 Heartbeat 채널을 찾을 수 없음'
+                f'{channel_key} 채널을 찾을 수 없음'
             )
         
         # 초기 로그인 메시지 (0분, 0팩)
@@ -176,11 +178,13 @@ Opening: {opening}'''
         self.expected_behavior = "online.txt에서 사용자가 제거됨"
         
         # 파일 시스템 확인
-        online_file_exists = self.check_file_exists('poke_data/group7/online.txt')
-        user_still_online = self.check_user_in_online_list('group7', self.test_user)
+        # TEST_MODE에서는 test 그룹 사용
+        group_name = 'test'
+        online_file_exists = self.check_file_exists(f'poke_data/{group_name}/online.txt')
+        user_still_online = self.check_user_in_online_list(group_name, self.test_user)
         
         # 온라인 목록 내용 확인
-        online_content = self.read_file_content('poke_data/group7/online.txt')
+        online_content = self.read_file_content(f'poke_data/{group_name}/online.txt')
         online_users = []
         if online_content:
             online_users = [line.strip() for line in online_content.split('\n') if line.strip()]
