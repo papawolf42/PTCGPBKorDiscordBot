@@ -18,12 +18,16 @@ class BaseTestCase:
         self.test_client = simulator.test_client
         self.channels = simulator.channels
         self.test_data_path = simulator.test_data_path
+        self.description = ""  # 테스트 설명
+        self.expected_behavior = ""  # 기대하는 동작
     
     def format_result(self, success: bool, message: str, details: Dict[str, Any] = None) -> Dict[str, Any]:
         """표준화된 테스트 결과 형식"""
         return {
             'success': success,
             'message': message,
+            'description': self.description,
+            'expected': self.expected_behavior,
             'details': details or {}
         }
     
@@ -83,6 +87,26 @@ class BaseTestCase:
         """지정된 시간 대기"""
         await asyncio.sleep(seconds)
         return self.format_result(True, f'{seconds}초 대기 완료')
+    
+    async def check_for_bot_response(self, channel, after_time=None, timeout=5.0) -> bool:
+        """봇이 채널에 응답했는지 확인"""
+        try:
+            # webhook을 사용하므로 시간 기준으로 확인
+            from datetime import datetime, timezone, timedelta
+            if not after_time:
+                after_time = datetime.now(timezone.utc) - timedelta(seconds=10)
+            
+            # 최근 메시지 확인
+            recent_messages = []
+            async for msg in channel.history(limit=10):
+                if msg.created_at < after_time:
+                    break
+                if msg.author.bot:
+                    recent_messages.append(msg)
+            
+            return len(recent_messages) > 0
+        except Exception as e:
+            return False
 
 
 class TestTimer:

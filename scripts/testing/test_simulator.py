@@ -11,6 +11,7 @@ test_simulator.py - Poke.py 자동화 테스트 시뮬레이터
 
 import discord
 import asyncio
+import aiohttp
 import os
 import sys
 import json
@@ -77,13 +78,22 @@ class PokeTestSimulator:
         load_dotenv('.env.test')
         self.token = os.getenv('DISCORD_BOT_TOKEN')
         
-        # 테스트 채널 ID
+        # 테스트 채널 ID (봇 응답 확인용)
         self.channel_ids = {
             'heartbeat_7': int(os.getenv('TEST_GROUP7_HEARTBEAT_ID', 0)),
             'command_7': int(os.getenv('TEST_GROUP7_COMMAND_ID', 0)),
             'heartbeat_8': int(os.getenv('TEST_GROUP8_HEARTBEAT_ID', 0)),
             'command_8': int(os.getenv('TEST_GROUP8_COMMAND_ID', 0))
         }
+        
+        # Webhook URL 설정 (메시지 전송용)
+        self.webhook_urls = {
+            'heartbeat': os.getenv('DISCORD_TEST_HEARTBEAT_WEBHOOK'),
+            'detect': os.getenv('DISCORD_TEST_DETECT_WEBHOOK'),
+        }
+        
+        # aiohttp 세션
+        self.session = None
         
         # 테스트 데이터 경로
         self.test_data_path = get_data_path('data_test')
@@ -99,6 +109,10 @@ class PokeTestSimulator:
         # 클라이언트 생성
         self.test_client = discord.Client(intents=intents)
         
+        # 봇 메시지 기록용
+        self.bot_messages = []
+        self.message_history = []
+        
         # 이벤트 핸들러
         @self.test_client.event
         async def on_ready():
@@ -112,6 +126,36 @@ class PokeTestSimulator:
                     self.logger.debug(f"채널 연결: {key} = #{channel.name}")
                 else:
                     self.logger.warning(f"채널 없음: {key} (ID: {channel_id})")
+        
+        @self.test_client.event
+        async def on_message(message):
+            """모든 메시지를 캡처하여 로깅"""
+            # 자신의 메시지는 무시
+            if message.author == self.test_client.user:
+                return
+            
+            # 봇 메시지 기록
+            if message.author.bot:
+                msg_info = {
+                    'timestamp': datetime.now().isoformat(),
+                    'author': str(message.author),
+                    'channel': str(message.channel),
+                    'content': message.content[:200],  # 처음 200자만
+                    'full_content': message.content
+                }
+                self.bot_messages.append(msg_info)
+                
+                # 실시간 로깅 (디버그 모드에서만)
+                if self.debug:
+                    self.logger.debug(f"[봇 메시지] {message.author}: {message.content[:100]}...")
+            
+            # 모든 메시지 히스토리에 추가
+            self.message_history.append({
+                'timestamp': datetime.now().isoformat(),
+                'author': str(message.author),
+                'channel': str(message.channel),
+                'content': message.content[:100] + ('...' if len(message.content) > 100 else '')
+            })
                     
     async def connect(self):
         """Discord 연결"""
@@ -133,7 +177,38 @@ class PokeTestSimulator:
             self.logger.error("클라이언트가 준비되지 않았습니다")
             return False
             
+        # aiohttp 세션 생성
+        self.session = aiohttp.ClientSession()
+        
         return True
+    
+    async def send_webhook_message(self, webhook_url, content, username=None):
+        """Webhook을 사용하여 메시지 전송"""
+        if not webhook_url:
+            self.logger.error("Webhook URL이 설정되지 않았습니다")
+            return None
+        
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        
+        # Webhook 페이로드 생성
+        payload = {
+            'content': content,
+            'username': username or 'Test User'
+        }
+        
+        try:
+            async with self.session.post(webhook_url, json=payload) as response:
+                if response.status == 204:  # Discord webhook 성공 응답
+                    self.logger.debug(f"Webhook 메시지 전송 성공: {username}")
+                    return True
+                else:
+                    error_text = await response.text()
+                    self.logger.error(f"Webhook 전송 실패: {response.status} - {error_text}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"Webhook 전송 중 오류: {str(e)}")
+            return False
         
     async def wait_for_bot(self, timeout=30):
         """봇이 온라인인지 확인"""
@@ -158,7 +233,16 @@ class PokeTestSimulator:
         """개별 테스트 실행"""
         self.logger.info(f"\n{'='*60}")
         self.logger.info(f"테스트: {test_name}")
+        
+        # 테스트 설명과 기대 동작 로깅
+        if hasattr(test_func, '__self__') and hasattr(test_func.__self__, 'description'):
+            self.logger.info(f"설명: {test_func.__self__.description}")
+            self.logger.info(f"기대 동작: {test_func.__self__.expected_behavior}")
+        
         self.logger.info(f"{'='*60}")
+        
+        # 테스트 시작 전 봇 메시지 개수 기록
+        bot_msg_count_before = len(self.bot_messages)
         
         start_time = time.time()
         try:
@@ -166,12 +250,25 @@ class PokeTestSimulator:
             result = await test_func()
             duration = time.time() - start_time
             
+            # 테스트 중 수신한 봇 메시지 확인
+            new_bot_messages = self.bot_messages[bot_msg_count_before:]
+            if new_bot_messages:
+                self.logger.info(f"봇 응답: {len(new_bot_messages)}개의 메시지 수신")
+                for msg in new_bot_messages[:3]:  # 최대 3개까지만 표시
+                    self.logger.info(f"  [{msg['author']}] {msg['content']}")
+                if len(new_bot_messages) > 3:
+                    self.logger.info(f"  ... 외 {len(new_bot_messages) - 3}개 메시지")
+            
             # 결과 기록
             test_result = {
                 'name': test_name,
                 'success': result.get('success', False),
                 'message': result.get('message', ''),
+                'description': result.get('description', ''),
+                'expected': result.get('expected', ''),
                 'details': result.get('details', {}),
+                'bot_messages': [msg['content'] for msg in new_bot_messages],
+                'bot_message_count': len(new_bot_messages),
                 'duration': duration,
                 'timestamp': datetime.now().isoformat()
             }
@@ -184,8 +281,11 @@ class PokeTestSimulator:
             else:
                 self.logger.error(f"❌ 실패: {result['message']}")
                 
+            # 상세 정보는 디버그 레벨에 관계없이 항상 표시
             if result.get('details'):
-                self.logger.debug(f"상세: {json.dumps(result['details'], ensure_ascii=False, indent=2)}")
+                self.logger.info("테스트 상세 정보:")
+                for key, value in result['details'].items():
+                    self.logger.info(f"  - {key}: {value}")
                 
             self.logger.info(f"소요시간: {duration:.2f}초")
             
@@ -248,12 +348,14 @@ class PokeTestSimulator:
             ("channel_access", connection.test_channel_access),
             ("data_directory", connection.test_data_directory),
             
-            # Phase 2: 메시지 테스트
-            ("heartbeat_user1", messages.test_heartbeat_testuser1),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
-            ("heartbeat_papawolf", messages.test_heartbeat_papawolf),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
-            ("verify_online", messages.test_verify_online_update),
+            # Phase 2: 메시지 테스트 - 로그인/로그아웃 시나리오
+            # Poke.py TEST MODE는 10초 타임아웃, 테스트는 5초-5초-15초로 구성
+            ("heartbeat_initial", messages.test_heartbeat_initial),  # 초기 로그인
+            ("wait_5sec", lambda: base.wait_seconds(5)),
+            ("heartbeat_maintain", messages.test_heartbeat_maintain),  # 5초 후 유지
+            ("wait_timeout", messages.test_wait_for_timeout),  # 15초 대기 (타임아웃)
+            ("verify_offline", messages.test_verify_offline),  # 오프라인 확인
+            ("relogin", messages.test_relogin_after_offline),  # 재로그인
             
             # Phase 3: 명령어 테스트
             ("cmd_state", commands.test_state_command),
@@ -287,6 +389,10 @@ class PokeTestSimulator:
             await self.test_client.close()
             self.logger.info("클라이언트 종료됨")
             
+        if self.session:
+            await self.session.close()
+            self.logger.info("HTTP 세션 종료됨")
+            
     def save_results(self):
         """결과 저장"""
         results = {
@@ -317,6 +423,29 @@ class PokeTestSimulator:
         self.logger.info(f"실패: {results['failed_tests']} ❌")
         self.logger.info(f"소요 시간: {results['duration']}")
         self.logger.info(f"결과 파일: {filename}")
+        
+        # 봇 메시지 요약
+        self.logger.info("\n" + "="*60)
+        self.logger.info("봇 응답 요약")
+        self.logger.info("="*60)
+        self.logger.info(f"총 봇 메시지 수: {len(self.bot_messages)}")
+        
+        # 채널별 봇 메시지 분류
+        channel_messages = {}
+        for msg in self.bot_messages:
+            channel = msg['channel']
+            if channel not in channel_messages:
+                channel_messages[channel] = []
+            channel_messages[channel].append(msg)
+        
+        for channel, messages in channel_messages.items():
+            self.logger.info(f"\n{channel} 채널: {len(messages)}개 메시지")
+            for msg in messages[:3]:  # 채널당 최대 3개까지만 표시
+                self.logger.info(f"  - {msg['content'][:100]}...")
+        
+        # 봇 메시지도 결과에 포함
+        results['bot_messages'] = self.bot_messages
+        results['bot_message_count'] = len(self.bot_messages)
         
         # 실패 목록
         if results['failed_tests'] > 0:
