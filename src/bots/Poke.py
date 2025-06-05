@@ -9,20 +9,55 @@ from discord.ext import commands
 from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
+import logging
+from pathlib import Path
+import sys
 
-# 프로젝트 모듈 import
-# from ..modules import GIST  # 기존 GIST 모듈
-from ..modules import GISTAdapter as GIST  # LocalFile을 사용하는 어댑터
-from ..modules.paths import ensure_directories
+# .env 파일 먼저 로드 (PROJECT_ROOT 환경변수를 사용하기 위해)
+load_dotenv()
 
-# .env 파일에서 환경 변수 로드
-# TEST_MODE가 설정되어 있으면 .env.test 사용
+# PROJECT_ROOT를 sys.path에 추가
+project_root = os.getenv('PROJECT_ROOT')
+if project_root:
+    sys.path.insert(0, project_root)
+
+# 프로젝트 모듈 import (절대 경로)
+from src.modules import GISTAdapter as GIST  # LocalFile을 사용하는 어댑터
+from src.modules.paths import ensure_directories, LOGS_DIR
+
+# 로깅 설정 함수
+def setup_logging():
+    """로깅 설정"""
+    # 로그 디렉토리 생성 (paths.py의 LOGS_DIR 사용)
+    log_dir = Path(LOGS_DIR)
+    log_dir.mkdir(exist_ok=True)
+    
+    # 로그 파일명
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = log_dir / f"poke_log_{timestamp}.log"
+    
+    # 로거 설정
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    
+    return logging.getLogger(__name__)
+
+# 로거 초기화
+logger = setup_logging()
+
+# TEST_MODE 확인 및 추가 환경 변수 로드
+# (PROJECT_ROOT는 이미 위에서 로드됨)
 if os.getenv('TEST_MODE', 'false').lower() == 'true':
-    load_dotenv('.env.test')
-    print("[TEST MODE] Using .env.test configuration")
+    load_dotenv('.env.test', override=True)  # .env.test의 값으로 덮어쓰기
+    logger.info("[TEST MODE] Using .env.test configuration")
 else:
-    load_dotenv()
-    print("[PRODUCTION MODE] Using .env configuration")
+    logger.info("[PRODUCTION MODE] Using .env configuration")
 
 MAIN_CHANNEL = os.getenv('DISCORD_MAIN_CHANNEL_ID')
 
@@ -118,15 +153,15 @@ for name, code in Member.DATA.items():
 @bot.event
 async def on_ready():
     """봇이 Discord에 연결되었을 때 실행"""
-    print(f'[BOT READY] {bot.user} has connected to Discord!')
-    print(f'[BOT READY] Connected to {len(bot.guilds)} guild(s)')
+    logger.info(f'[BOT READY] {bot.user} has connected to Discord!')
+    logger.info(f'[BOT READY] Connected to {len(bot.guilds)} guild(s)')
     
     is_test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
     if is_test_mode:
-        print(f'[TEST MODE] Running in test environment')
-        print(f'[TEST MODE] Monitoring channels:')
+        logger.info(f'[TEST MODE] Running in test environment')
+        logger.info(f'[TEST MODE] Monitoring channels:')
         for server_id, server in SERVER_DICT.items():
-            print(f'  - {server.FILE.NAME}: HEARTBEAT={server.ID}, COMMAND={server.COMMAND}')
+            logger.info(f'  - {server.FILE.NAME}: HEARTBEAT={server.ID}, COMMAND={server.COMMAND}')
     
     
 async def safe_send(channel, message, BLOCK=False):
@@ -163,9 +198,9 @@ async def safe_history(thread, retries=5):
         try:
             return [msg async for msg in thread.history(limit=50)]
         except Exception as e:
-            print(f"⚠️ 메시지 가져오기 실패 (시도 {attempt + 1}/{retries}): {e}")
+            logger.warning(f"⚠️ 메시지 가져오기 실패 (시도 {attempt + 1}/{retries}): {e}")
             await asyncio.sleep(2 ** attempt)
-    print(f"⛔ 최종 실패: {thread.name}")
+    logger.error(f"⛔ 최종 실패: {thread.name}")
     return None
 
 async def safe_fetch_channel(channel, retries=5):
@@ -173,9 +208,9 @@ async def safe_fetch_channel(channel, retries=5):
         try:
             return bot.fetch_channel(channel)
         except Exception as e:
-            print(f"⚠️ 채널 가져오기 실패 (시도 {attempt + 1}/{retries}): {e}")
+            logger.warning(f"⚠️ 채널 가져오기 실패 (시도 {attempt + 1}/{retries}): {e}")
             await asyncio.sleep(2 ** attempt)
-    print(f"⛔ 최종 실패: {channel}")
+    logger.error(f"⛔ 최종 실패: {channel}")
     return None
 
 async def recent_godpack(Server):
@@ -183,11 +218,11 @@ async def recent_godpack(Server):
     day = 4
     days_ago = now - timedelta(hours=24*day)
     
-    print(f"채널 ID: {Server.DETECT}에서 {day}일 이내 메시지 조회 시작")
+    logger.info(f"채널 ID: {Server.DETECT}에서 {day}일 이내 메시지 조회 시작")
     channel = await bot.fetch_channel(Server.DETECT)
     try:
         messages = [msg async for msg in channel.history(limit=1000)]
-        print(f"총 {len(messages)}개의 메시지를 확인했습니다.")
+        logger.info(f"총 {len(messages)}개의 메시지를 확인했습니다.")
 
         detected_gp = 0
         for message in messages:
@@ -229,12 +264,12 @@ async def recent_godpack(Server):
                                 else :
                                     Server.GPTEST.edit('+', save, 'NaN')
 
-        print(f"최근 {day}일 이내 감지된 레어팩 수: {detected_gp}개")
+        logger.info(f"최근 {day}일 이내 감지된 레어팩 수: {detected_gp}개")
         Server.GODPACK.update()
         Server.GPTEST.update()
         
     except Exception as e:
-        print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
+        logger.error(f"❌ 메시지 불러오는 중 오류 발생: {e}")
 
 
 async def recent_online(Server):
@@ -245,10 +280,10 @@ async def recent_online(Server):
 
     channel = await bot.fetch_channel(Server.ID)
     
-    print(f"채널 ID: {Server.ID}에서 최근 메시지 조회 시작")
+    logger.info(f"채널 ID: {Server.ID}에서 최근 메시지 조회 시작")
     try:
         messages = [msg async for msg in channel.history(limit=500)]
-        print(f"총 {len(messages)}개의 메시지를 확인했습니다.")
+        logger.info(f"총 {len(messages)}개의 메시지를 확인했습니다.")
         for message in messages:
             if "Online:" in message.content:
                 if message.created_at >= Threshold["Off"]:
@@ -267,11 +302,11 @@ async def recent_online(Server):
                         if USER_DICT[name].CODE not in Server.FILE.DATA and USER_DICT[name].off.get(Server.ID, None) is None:
                             USER_DICT[name].offlined(Server, message)
 
-        print(f"✅ 최근 15분 이내에 감지된 온라인 유저 수: {len(Server.FILE.DATA)}명")
+        logger.info(f"✅ 최근 15분 이내에 감지된 온라인 유저 수: {len(Server.FILE.DATA)}명")
         Server.FILE.update()
         
     except Exception as e:
-        print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
+        logger.error(f"❌ 메시지 불러오는 중 오류 발생: {e}")
 
 async def recent_offline(Server):
     now = datetime.now(timezone.utc)
@@ -281,10 +316,10 @@ async def recent_offline(Server):
 
     channel = await bot.fetch_channel(Server.ID)
     
-    print(f"채널 ID: {Server.ID}에서 오래된 메시지 조회 시작")
+    logger.info(f"채널 ID: {Server.ID}에서 오래된 메시지 조회 시작")
     try:
         messages_old = [msg async for msg in channel.history(limit=50000)]
-        print(f"총 {len(messages_old)}개의 메시지를 확인했습니다.")
+        logger.info(f"총 {len(messages_old)}개의 메시지를 확인했습니다.")
         for message in messages_old :
             if "Online:" in message.content:
                 if message.created_at < Threshold["Off"] and message.created_at >= Threshold["Rest"] :
@@ -293,9 +328,9 @@ async def recent_offline(Server):
                         if USER_DICT[name].CODE not in Server.FILE.DATA and USER_DICT[name].off.get(Server.ID, None) is None:
                             USER_DICT[name].offlined(Server, message)
                             
-        print("오프라인 유저를 모두 확인했습니다.")
+        logger.info("오프라인 유저를 모두 확인했습니다.")
     except Exception as e:
-        print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
+        logger.error(f"❌ 메시지 불러오는 중 오류 발생: {e}")
         
         
 async def do_update():
@@ -309,10 +344,10 @@ async def do_update():
             if user.CODE in RAW_GIST_DICT[ID] :
                 Server.WAITING.discard(user)
                 Server.ONLINE.add(user)
-                print(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
+                logger.info(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
                 await Server_Channel[ID].send(f"{user.NAME} 님이 GIST에 업데이트 되었습니다!")
             else :
-                print(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
+                logger.debug(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
                 await Server_Channel[ID].send(f"{user.NAME} 님의 GIST 업데이트 대기 중...")
 
 async def update_periodic():
@@ -341,7 +376,7 @@ async def do_verify(Server):
                 await asyncio.sleep(1)
             threads.append(thread)
         except Exception as e:
-            print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
+            logger.error(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
     
         
     for thread in threads.copy() :
@@ -360,12 +395,12 @@ async def do_verify(Server):
                 
             if thread_created_at < one_week_ago :
                 try :
-                    print(f"{thread.name}이 삭제 됩니다.")
+                    logger.info(f"{thread.name}이 삭제 됩니다.")
                     await thread.delete()
                     await asyncio.sleep(2)
                     threads.remove(thread)
                 except Exception as e:
-                    print(f"{thread.name} 삭제에 실패했습니다", e)
+                    logger.error(f"{thread.name} 삭제에 실패했습니다", e)
                     
         
 
@@ -462,7 +497,7 @@ async def do_verify(Server):
                             THREAD_DICT["Yet"].append(thread)
             
                     else :
-                        print(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
+                        logger.warning(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
                         await alert_channel.send(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
                     
             elif Server.Tag["Bad"] in thread_tags_ids :
@@ -472,7 +507,7 @@ async def do_verify(Server):
                 THREAD_DICT["Good"].append(thread)
                     
             else :
-                print(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
+                logger.warning(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
                 await alert_channel.send(f"유효하지 않은 포스트가 검증 채널에 있습니다.\n제목 : {thread_name}")
 
         
@@ -488,23 +523,23 @@ async def do_verify(Server):
                 thread = next((temp for temp in THREAD_DICT["Good"] if title == temp.name), None)
                 Server.GODPACK.edit('+', text, "Good")
                 yet_change = True
-                print(f"❗❗ {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
+                logger.info(f"❗❗ {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
                 await alert_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다.")
                 await main_channel.send(f"🎉 {parts[2]} {parts[3]} 은 축으로 검증 되었습니다. ({Server.FILE.NAME})")
                 try:
                     museum_channel = await bot.fetch_channel(Server.MUSEUM)
                     await Server.post_museum(thread, museum_channel)
                 except Exception as e:
-                    print(f"{title} 박물관 전시 실패! ", e)
+                    logger.error(f"{title} 박물관 전시 실패! ", e)
             
             elif title in [temp.name for temp in THREAD_DICT["Bad"]] :
                 Server.GODPACK.edit('+', text, "Bad")
                 Server.GPTEST.edit('-', text, None)
                 yet_change = True
-                print(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
+                logger.info(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
                 await alert_channel.send(f"❗❗ {parts[2]} {parts[3]} 은 망으로 검증 되었습니다.")
             elif title in [temp.name for temp in THREAD_DICT["Error"]] :
-                print(f"❗❗ {parts[2]} {parts[3]} 에 오류가 있습니다.")
+                logger.error(f"❗❗ {parts[2]} {parts[3]} 에 오류가 있습니다.")
             else :
                 KST = timezone(timedelta(hours=9))
                 timenow = datetime.now(KST)
@@ -515,7 +550,7 @@ async def do_verify(Server):
                 if abs(timenow - parsed_time) <= timedelta(minutes=10) :
                     continue
                     
-                    print(f"⚠️{title} 포스트를 찾을 수 없습니다.")
+                    logger.warning(f"⚠️{title} 포스트를 찾을 수 없습니다.")
                     await alert_channel.send(f"{title} 포스트를 찾을 수 없어 임시로 생성합니다.")
                     
                     inform = {"name" : parts[2], "number" : parts[3], "pack" : parts[5][:-1], "percent" : parts[4][:-1]}
@@ -537,11 +572,11 @@ async def do_verify(Server):
                                             break
                                         
                     except Exception as e:
-                        print(f"❌ 메시지 불러오는 중 오류 발생: {e}")
+                        logger.error(f"❌ 메시지 불러오는 중 오류 발생: {e}")
                     try:
                         await Server.Post(forum_channel, images, inform, title)
                     except Exception as e:
-                        print(f"{title} 포스팅 실패 : ", e)
+                        logger.error(f"{title} 포스팅 실패 : ", e)
                     await asyncio.sleep(1)
         if yet_change :
             Server.GODPACK.update()
@@ -555,7 +590,7 @@ async def verify_periodic(Server):
 
 @bot.event
 async def on_ready():
-    print(f"✅ 로그인됨: {bot.user}")
+    logger.info(f"✅ 로그인됨: {bot.user}")
     
     for server in SERVER_DICT.values():
         await recent_online(server)
@@ -580,7 +615,7 @@ async def on_message(message):
             if name in USER_DICT.keys():
                 USER_DICT[name].called(Server, message)
                 if USER_DICT[name].CODE not in Server.FILE.DATA:
-                    print(f"✅ 수집된 이름: {name}, 코드 : {USER_DICT[name].CODE}")
+                    logger.info(f"✅ 수집된 이름: {name}, 코드 : {USER_DICT[name].CODE}")
                     USER_DICT[name].online(Server)
                     Server.FILE.update()
                     await message.channel.send(f"로그인 시도 : {name}")
@@ -596,12 +631,12 @@ async def on_message(message):
                 if remove :
                     for user in remove :
                         user.offline(Server)
-                        print(f"{user.NAME} 님이 OFF-LINE 되었습니다.")
+                        logger.info(f"{user.NAME} 님이 OFF-LINE 되었습니다.")
                         Server.FILE.update()
                         await message.channel.send(f"{user.NAME} 님이 OFF-LINE 되었습니다.")
                         
             except Exception as e:
-                print(f"❌ 오류 발생: {e}")
+                logger.error(f"❌ 오류 발생: {e}")
     
     
     if message.channel.id in [Server.DETECT for Server in SERVER_DICT.values()] :
@@ -610,11 +645,11 @@ async def on_message(message):
                 break
         
         if "Invalid" in message.content:
-            print("Invalid God Pack 을 찾았습니다.")
+            logger.debug("Invalid God Pack 을 찾았습니다.")
             return
         
         elif "found by" in message.content:
-            print("Pseudo God Pack 을 찾았습니다.")
+            logger.info("Pseudo God Pack 을 찾았습니다.")
             inform, title = Server.found_Pseudo(message)
             
             if inform and title :
@@ -622,11 +657,11 @@ async def on_message(message):
                 forum_channel = bot.get_channel(Server.POSTING)
                 await Server.Post(forum_channel, images, inform, title)
             else :
-                print("메시지에 오류가 있었습니다")
+                logger.warning("메시지에 오류가 있었습니다")
 
         
         elif "Valid" in message.content :
-            print("God Pack 을 찾았습니다!")
+            logger.info("God Pack 을 찾았습니다!")
             inform, title = Server.found_GodPack(message)
             
             if inform and title :
@@ -634,7 +669,7 @@ async def on_message(message):
                 forum_channel = bot.get_channel(Server.POSTING)
                 await Server.Post(forum_channel, images, inform, title)
             else :
-                print("메시지에 오류가 있었습니다")
+                logger.warning("메시지에 오류가 있었습니다")
                 
 def yet_str(text, add = None) :
     parts = text.split()
@@ -893,7 +928,7 @@ async def reply(ctx):
         full_text = f"24 시간 이내 검증 횟수 리스트\n{reply_text}"
         await safe_send(ctx, full_text, True)
     except Exception as e:
-        print("에러가 있습니다.", e)
+        logger.error("에러가 있습니다.", e)
 
 @bot.command()
 async def custom(ctx):
@@ -922,7 +957,7 @@ async def custom(ctx):
             threads.append(thread)
             
         except Exception as e:
-            print(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
+            logger.error(f"❌ 스레드 {thread.name} 복원 중 오류 발생: {e}")
 
     Recent_thread = []
     for thread in threads :
@@ -1030,7 +1065,7 @@ async def add(ctx, name, code):
         Member.edit('+', name, code)
         Member.update()
         USER_DICT[name] = GIST.USER(name, code)
-        print(f"Member 에서 새로운 ID를 갱신했습니다! : {name}")
+        logger.info(f"Member 에서 새로운 ID를 갱신했습니다! : {name}")
         await ctx.send(f"Member에 {name} 추가 하였습니다.")
     
 @bot.command()
@@ -1041,7 +1076,7 @@ async def delete(ctx, name, code):
         for Server in list(USER_DICT[name].Server):
             USER_DICT[name].offline(Server)
         USER_DICT.pop(name, None)
-        print(f"Member 에서 제거된 ID를 갱신했습니다! : {name}")
+        logger.info(f"Member 에서 제거된 ID를 갱신했습니다! : {name}")
         await ctx.send(f"Member에 {name} 제거 하였습니다.")
     
 @bot.command()
@@ -1049,7 +1084,7 @@ async def mandate(ctx, code):
     if str(ctx.author.id) in Admin.DATA:
         Admin.edit('+', code)
         Admin.update()
-        print(f"Author 에서 새로운 ID를 갱신했습니다! : {code}")
+        logger.info(f"Author 에서 새로운 ID를 갱신했습니다! : {code}")
         await ctx.send(f"Author에 {code} 추가 하였습니다.")
 
 @bot.command()
@@ -1119,7 +1154,7 @@ async def member(ctx):
         else:
             await ctx.send("등록된 멤버가 없습니다.")
     except Exception as e:
-        print("에러가 있습니다.", e)
+        logger.error("에러가 있습니다.", e)
 
 @bot.command()
 async def barracks(ctx):
@@ -1155,9 +1190,9 @@ async def barracks(ctx):
                         else :
                             Expand[ex] = expand_rate
         except Exception as e:
-            print(name)
-            print(select)
-            print(e)
+            logger.error(name)
+            logger.error(select)
+            logger.error(e)
             
         text = f"현재 온라인 상태 ({num_on}명, 총 {total_barracks} 배럭 {round(total_rate,2):<5}Packs/min):\n"
         for key, value in Expand.items():
@@ -1236,7 +1271,7 @@ async def main():
     is_test_mode = os.getenv('TEST_MODE', 'false').lower() == 'true'
     if is_test_mode:
         test_duration = int(os.getenv('TEST_DURATION', '10'))  # 기본 10초
-        print(f"[TEST MODE] Bot will auto-shutdown after {test_duration} seconds")
+        logger.info(f"[TEST MODE] Bot will auto-shutdown after {test_duration} seconds")
         asyncio.create_task(auto_shutdown(test_duration))
     
     asyncio.create_task(update_periodic())
@@ -1249,7 +1284,7 @@ async def main():
 async def auto_shutdown(duration):
     """테스트 모드에서 지정된 시간 후 봇을 종료"""
     await asyncio.sleep(duration)
-    print(f"[TEST MODE] Auto-shutdown after {duration} seconds")
+    logger.info(f"[TEST MODE] Auto-shutdown after {duration} seconds")
     await bot.close()
     # 강제 종료를 위한 추가 조치
     os._exit(0)
@@ -1258,4 +1293,3 @@ if __name__ == "__main__":
     asyncio.run(main())
             
         
-

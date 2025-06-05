@@ -134,7 +134,8 @@ class ConnectionTests(BaseTestCase):
     
     async def test_data_directory(self):
         """테스트 데이터 디렉토리 확인"""
-        data_path = self.test_data_path
+        from pathlib import Path
+        data_path = Path(self.test_data_path)
         poke_data_path = data_path / 'poke_data'
         
         # 디렉토리 존재 확인
