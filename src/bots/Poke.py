@@ -24,6 +24,7 @@ if project_root:
 # 프로젝트 모듈 import (절대 경로)
 from src.modules import GISTAdapter as GIST  # LocalFile을 사용하는 어댑터
 from src.modules.paths import ensure_directories, LOGS_DIR
+from src.modules.PokeConfig import get_time_thresholds, get_bad_thresholds, get_special_conditions
 
 # 로깅 설정 함수
 def setup_logging():
@@ -424,6 +425,11 @@ async def do_verify(Server):
     """갓팩 검증 수행 (테스트 명령어와 주기적 실행 공통)"""
     Server.Health = datetime.now(timezone.utc) + timedelta(hours=9)
     
+    # 서버별 시간 설정 가져오기
+    times = get_time_thresholds(Server.FILE.NAME)
+    bad_threshold = get_bad_thresholds(Server.FILE.NAME)
+    special_conditions = get_special_conditions(Server.FILE.NAME)
+    
     forum_channel = await bot.fetch_channel(Server.POSTING)
     alert_channel = await bot.fetch_channel(Server.DETECT)
     main_channel  = await bot.fetch_channel(MAIN_CHANNEL)
@@ -445,8 +451,6 @@ async def do_verify(Server):
     for thread in threads.copy() :
         thread_tags_ids = [tag.id for tag in thread.applied_tags]
         
-        now = datetime.now(timezone.utc)
-        one_week_ago = now - timedelta(hours=24*7)
         if Server.Tag["Bad"] in thread_tags_ids :
             try :
                 parts = thread.name.split()
@@ -456,7 +460,7 @@ async def do_verify(Server):
             except :
                 thread_created_at = thread.created_at
                 
-            if thread_created_at < one_week_ago :
+            if thread_created_at < times["bad_delete_threshold"] :
                 try :
                     logger.info(f"{thread.name}이 삭제 됩니다.")
                     await thread.delete()
@@ -479,16 +483,10 @@ async def do_verify(Server):
                 THREAD_DICT["Notice"].append(thread)
                 
             elif Server.Tag["Yet"] in thread_tags_ids :
-                now = datetime.now(timezone.utc)
-                one_ago   = now - timedelta(hours=12)
-                two_ago   = now - timedelta(hours=24)
-                three_ago = now - timedelta(hours=36)
-                
-
-                time_threshold = {"1P" : two_ago, "2P" : two_ago, "3P" : two_ago,
-                                  "4P" : three_ago, "5P" : three_ago}
-                
-                bad_threshold  = {"2P" : 5, "3P" : 8, "4P" : 11, "5P" : 14}
+                # 설정에서 가져온 값 사용
+                now = times["now"]
+                one_ago = times["one_ago"]
+                time_threshold = times["time_threshold"]
                 
                 messages = await safe_history(thread)
                 if messages is None:
@@ -531,7 +529,7 @@ async def do_verify(Server):
                         else :
                             THREAD_DICT["Yet"].append(thread)
                     
-                    elif no >= 3 and bad == 0 :
+                    elif no >= special_conditions["min_question_count"] and bad == 0 :
                         if thread_created_at < one_ago :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
@@ -542,7 +540,7 @@ async def do_verify(Server):
                         
                     
                     elif pack in ["2P", "3P", "4P", "5P"] :
-                        if thread_created_at < time_threshold[pack] or bad >= bad_threshold[pack] :
+                        if thread_created_at < time_threshold.get(pack, time_threshold["1P"]) or bad >= bad_threshold.get(pack, 99) :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
                             THREAD_DICT["Bad"].append(thread)
@@ -551,7 +549,7 @@ async def do_verify(Server):
                             THREAD_DICT["Yet"].append(thread)
                     
                     elif pack == "1P" :
-                        if thread_created_at < time_threshold[pack] :
+                        if thread_created_at < time_threshold.get(pack, time_threshold["1P"]) :
                             tag_id = Server.Tag["Bad"]
                             bad_tag = next((tag for tag in forum_tags if tag.id == tag_id), None)
                             THREAD_DICT["Bad"].append(thread)
