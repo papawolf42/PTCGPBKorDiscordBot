@@ -237,6 +237,23 @@ async def safe_history(thread, retries=5):
     logger.error(f"⛔ 최종 실패: {thread.name}")
     return None
 
+def is_my_channel(channel_id):
+    """현재 봇이 관리하는 채널인지 확인"""
+    for server_id, server in SERVER_DICT.items():
+        # Heartbeat ID를 키로 사용하는 서버인 경우
+        if server_id == channel_id:
+            return True
+        # 서버가 관리하는 채널들 체크
+        if hasattr(server, 'DETECT') and channel_id == server.DETECT:
+            return True
+        if hasattr(server, 'POSTING') and channel_id == server.POSTING:
+            return True
+        if hasattr(server, 'COMMAND') and channel_id == server.COMMAND:
+            return True
+        if hasattr(server, 'MUSEUM') and channel_id == server.MUSEUM:
+            return True
+    return False
+
 async def safe_fetch_channel(channel, retries=5):
     for attempt in range(retries):
         try:
@@ -665,6 +682,10 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
+        return
+    
+    # 내가 관리하는 채널이 아니면 무시
+    if not is_my_channel(message.channel.id):
         return
     
     await bot.process_commands(message)
