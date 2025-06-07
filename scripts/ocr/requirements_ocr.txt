@@ -1,0 +1,18 @@
+# OCR 엔진 라이브러리
+pytesseract
+easyocr
+# paddlepaddle  # Apple Silicon Mac에서 작동하지 않음
+# paddleocr
+
+# macOS Vision.framework (Apple Silicon 지원)
+pyobjc-framework-Vision
+pyobjc-framework-Quartz
+
+# 이미지 처리
+pillow
+opencv-python
+numpy
+
+# 유틸리티
+requests  # 이미지 다운로드용
+tqdm      # 진행률 표시

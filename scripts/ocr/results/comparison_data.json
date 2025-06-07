@@ -1,0 +1,92 @@
+[
+  {
+    "image": "20250420002302_1_FRIENDCODE_2_packs-659CE.png",
+    "expected": {
+      "name": "laff155",
+      "code": "6855-9066-8316-7259"
+    },
+    "results": {
+      "tesseract": {
+        "name": null,
+        "friend_code": null,
+        "raw_text": "",
+        "time": 0.15378594398498535,
+        "engine": "tesseract"
+      },
+      "easyocr": {
+        "name": "laff155",
+        "friend_code": "6855-9066-8316-7259",
+        "raw_text": "담신의 laff155 친구 I0 6855.9066-8316*7259 자\"거6",
+        "time": 0.3655102252960205,
+        "engine": "easyocr"
+      },
+      "vision": {
+        "name": "laff155",
+        "friend_code": "6855-9066-8316-7259",
+        "raw_text": "laff155 MAID 6855-9066-8316-7259",
+        "time": 1.5862720012664795,
+        "engine": "vision"
+      }
+    }
+  },
+  {
+    "image": "20250606130641_1_FRIENDCODE_1_packs-08C91.png",
+    "expected": {
+      "name": "MinMin5650",
+      "code": "5536-3193-4550-0719"
+    },
+    "results": {
+      "tesseract": {
+        "name": "Minttins650",
+        "friend_code": null,
+        "raw_text": "Minttins650",
+        "time": 0.14237594604492188,
+        "engine": "tesseract"
+      },
+      "easyocr": {
+        "name": "MinMin565o",
+        "friend_code": "5536-3193-4550-0719",
+        "raw_text": "MinMin565o 친구 I0 5536-3193.4550-0719 자\"거6",
+        "time": 0.31092214584350586,
+        "engine": "easyocr"
+      },
+      "vision": {
+        "name": "MinMin5650",
+        "friend_code": "5650-5536-3193-4550",
+        "raw_text": "MinMin5650 5536-3193-4550-0719",
+        "time": 0.054096221923828125,
+        "engine": "vision"
+      }
+    }
+  },
+  {
+    "image": "20250606214453_1_FRIENDCODE_2_packs-ED9A8.png",
+    "expected": {
+      "name": "RKLB1",
+      "code": "5494-0377-0130-0243"
+    },
+    "results": {
+      "tesseract": {
+        "name": "RKLBI",
+        "friend_code": null,
+        "raw_text": "A  RKLBI",
+        "time": 0.13129210472106934,
+        "engine": "tesseract"
+      },
+      "easyocr": {
+        "name": "RKLBI",
+        "friend_code": "5494-0377-0130-0243",
+        "raw_text": "담신의 준라3어 RKLBI 친구 I0 5494-0377.0130-0243",
+        "time": 0.29683899879455566,
+        "engine": "easyocr"
+      },
+      "vision": {
+        "name": "CHAIO",
+        "friend_code": "5494-0377-0130-0243",
+        "raw_text": "CHAIO RIDIC 290 RKLB1 47ID 5494-0377-0130-0243",
+        "time": 0.05557584762573242,
+        "engine": "vision"
+      }
+    }
+  }
+]
