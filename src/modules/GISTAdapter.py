@@ -229,7 +229,13 @@ class SERVER:
     
     def found_Pseudo(self, message):
         lines = message.content.split("\n")
-        if len(lines) < 3:
+        
+        # Double two star 등 1줄 메시지를 위한 예외 처리
+        if len(lines) == 1 and "found by" in lines[0]:
+            # 1줄 메시지도 처리 가능
+            pass
+        elif len(lines) < 3:
+            # 기존 3줄 이상 필요한 메시지들을 위한 체크
             return None, None
         
         inform = self.extract_Pseudo(lines)
@@ -322,89 +328,111 @@ class SERVER:
             raise Exception("이미지가 비어있습니다. 첨부 이미지를 다시 확인하세요.")
     
     def make_title(self, inform, time_str):
-        name = inform['name']
-        number = inform['number']
-        pack = inform['pack']
-        percent = inform['percent']
-        title = f"{name} {number} / {percent:.0f}% / {pack}P / " + time_str
-        sub = f"{name} {number} {percent:.0f}% {pack}P"
+        name = inform['name']        # 사용자명
+        number = inform['number']    # 팩 종류 (Solgaleo, Palkia 등)
+        pack = inform['pack']        # 팩 순서 (1~5)
+        percent = inform['percent']  # 갓팩: 2성 비율(20~100), Special: 카드 타입(Trainer 등)
+        
+        # 팩 타입에 따라 다른 형식 사용
+        if inform['type'] == 'godpack':
+            # 갓팩 형식: "DUCK Solgaleo / 100% / 3P / 시간"
+            percent_val = float(percent) if isinstance(percent, str) else percent
+            title = f"{name} {number} / {percent_val:.0f}% / {pack}P / " + time_str
+            sub = f"{name} {number} {percent_val:.0f}% {pack}P"
+        elif inform['type'] == 'special':
+            # Special Card 형식: "User Palkia / Trainer / 1P / 시간"
+            title = f"{name} {number} / {percent} / {pack}P / " + time_str
+            sub = f"{name} {number} {percent} {pack}P"
+        else:
+            # 예외 처리 (있을 경우)
+            print(f"[GISTAdapter] make_title: 알 수 없는 타입 - {inform.get('type')}")
+            return None, None, None
+        
         save = time_str + ' ' + sub
         
         return title, sub, save
             
     def extract_GodPack(self, lines):
-        inform = {}
-        
-        second_line = lines[1]
-        third_line = lines[2]
-        
-        parts = second_line.split()
-        
-        pattern = r"([A-Za-z0-9]*[A-Za-z])(\d*)"
-        match = re.search(pattern, parts[0])
-        if match:
-            name, number = match.groups()
-            inform['name'] = name
-            inform['number'] = number if number else '000'
-        else:
+        pattern = re.compile(r"\[(\d)/5\]\[(\d+)P\]\[(\w+)\]")
+        pattern2 = re.compile(r"^(.*?)\s*\((.*?)\)$")
+
+        # lines 길이 체크
+        if len(lines) < 2:
+            print(f"[GISTAdapter] extract_GodPack: 라인 수 부족 (최소 2줄 필요, 현재 {len(lines)}줄)")
             return None
-        
-        if len(parts) > 1:
-            match = re.search(r"\((\d+)\)", parts[1])
-            inform['code'] = match.group(1) if match else None
-        else:
-            inform['code'] = None
-            
-        pattern = r"(\d+)/(\d+)]\[?(\d+)P\]?"
-        match = re.search(pattern, third_line)
-        
-        if match:
-            a, b, p_value = match.groups()
-            percentage = (int(a) / int(b)) * 100
-            inform['percent'] = percentage
-            inform['pack'] = p_value
-        else:
-            pattern = r"\((\d+)\s+packs\)"
-            match = re.search(pattern, third_line)
+
+        for line in lines:
+            match = pattern.search(line)
             if match:
-                p_value, = match.groups()
-                percentage = 10
-                inform['percent'] = percentage
-                inform['pack'] = p_value
-            else:
-                return None
-        return inform
+                percent = str(int(match.group(1)) * 20)  # 2성 비율
+                pack = match.group(2)                     # 팩 순서  
+                number = match.group(3)                   # 팩 종류
+                
+                # 두 번째 라인에서 이름과 코드 추출
+                match2 = pattern2.search(lines[1])
+                if match2:
+                    name = match2.group(1).strip()       # 사용자명
+                    code = match2.group(2)               # 친구코드
+                    
+                    # inform 딕셔너리 - 실제 의미:
+                    # name: 사용자명 (예: DUCK, Saisai2)
+                    # number: 팩 종류 (예: Solgaleo, Palkia, Buzzwole)
+                    # percent: 2성 이상 카드 비율 (20/40/60/80/100)
+                    # pack: 팩 순서 (1~5번째 중 몇 번째 팩에서 나왔는지)
+                    # code: 16자리 친구코드
+                    inform = {
+                        "name": name,
+                        "number": number,    # 팩 종류
+                        "percent": percent,  # 2성 비율
+                        "pack": pack,        # 팩 순서
+                        "code": code
+                    }
+                    inform['type'] = 'godpack'  # 파싱 성공 시 타입 추가
+                    print(f"[GISTAdapter] extract_GodPack: 파싱 성공 - {percent}%, {name}, {number}")
+                    return inform
+
+        print(f"[GISTAdapter] extract_GodPack: 파싱 실패")
+        return None
     
     def extract_Pseudo(self, lines):
-        inform = {'percent': 40 if "Double" in lines[0] else 20}
-        
-        no_mention = re.sub(r'^.*?found by\s+', '', lines[0])
-        
-        parts = no_mention.split()
-        
-        pattern = r"([A-Za-z0-9]*[A-Za-z])(\d*)"
-        match = re.search(pattern, parts[0])
-        if match:
-            name, number = match.groups()
-            inform['name'] = name
-            inform['number'] = number if number else '000'
-        else:
-            return None
-        
-        if len(parts) > 1:
-            match = re.search(r"\((\d+)\)", parts[1])
-            inform['code'] = match.group(1) if match else None
-        else:
-            inform['code'] = None
+        # "Special Card" 메시지 포맷을 분석하는 정규식
+        # 예: "Trainer found by User (123...)" 또는 "Double two star found by User (123...)"
+        pattern = re.compile(r"(.+?) found by (.*?) \((\d{16})\) in instance: \d+ \((\d+) packs, ([^)]+)\)")
+
+        for line in lines:
+            # 라인 시작 부분의 @멘션 (e.g., @Rami) 을 먼저 제거하여 정규식에 방해되지 않도록 함
+            cleaned_line = re.sub(r'^@\S+\s*', '', line.strip())
             
-        pattern = r"\((\d+) packs.*?\)"
-        match = re.search(pattern, lines[0])
-        if match:
-            inform['pack'] = match.group(1)
-        else:
-            return None
-            
-        return inform
+            match = pattern.search(cleaned_line)
+            if match:
+                star_type = match.group(1).strip()     # 카드 타입
+                name = match.group(2).strip()          # 사용자명
+                friend_code = match.group(3)           # 친구코드
+                pack_count = match.group(4)            # 팩 순서
+                card_name = match.group(5).strip()     # 팩 종류
+
+                # inform 딕셔너리 - 실제 의미:
+                # name: 사용자명 (예: 「NEQI ㆍ귀이이 1.•넅)
+                # number: 팩 종류 (예: Palkia, Solgaleo)
+                # percent: 카드 타입 (Trainer/Full Art/Rainbow/Double two star)
+                # pack: 팩 순서 (1~5번째 중 몇 번째 팩에서 나왔는지)
+                # code: 16자리 친구코드
+                inform = {
+                    "name": name,
+                    "number": card_name,    # 팩 종류
+                    "percent": star_type,   # Special Card에서는 카드 타입
+                    "pack": pack_count,     # 팩 순서
+                    "code": friend_code
+                }
+                inform['type'] = 'special'  # 파싱 성공 시 타입 추가
+                print(f"[GISTAdapter] extract_Pseudo: 파싱 성공 - {star_type}, {name}, {card_name}")
+                return inform
+            else:
+                # 디버깅을 위한 로그
+                if "found by" in cleaned_line:
+                    print(f"[GISTAdapter] extract_Pseudo: 파싱 실패 - {cleaned_line[:50]}...")
+
+        return None
 
 
 # USER 클래스 (GIST.py와 동일)

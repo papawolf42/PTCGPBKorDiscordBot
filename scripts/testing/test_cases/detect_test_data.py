@@ -14,7 +14,7 @@ IMAGE_DIR = PROJECT_ROOT / "DATA_DETECT" / "media"
 # 테스트 케이스 정의
 DETECT_MESSAGE_TEST_CASES = {
     "valid_godpack_1": {
-        "type": "valid",
+        "type": "godpack",
         "message": {
             "content": """@yunpac Shazam!
 yunpac426 (9053874066196496)
@@ -37,7 +37,7 @@ Backing up to the Accounts\\GodPacks folder and continuing...""",
     },
     
     "valid_godpack_2": {
-        "type": "valid",
+        "type": "godpack",
         "message": {
             "content": """@Saisai Keep up the great work!
 Saisai2 (0266352633065275)
@@ -116,7 +116,7 @@ Backing up to the Accounts\\GodPacks folder and continuing...""",
             IMAGE_DIR / "20250420014142_3_FRIENDCODE_1_packs-55225.png"
         ],
         "expected": {
-            "should_create_post": False,  # Double two star는 포스팅하지 않음
+            "should_create_post": True,  # Double two star도 포스팅함
             "status": None,
             "user": "Rami",
             "instance_id": "Rami108",
@@ -135,20 +135,145 @@ Backing up to the Accounts\\GodPacks folder and continuing...""",
             IMAGE_DIR / "20250420030006_1_FRIENDCODE_3_packs-BB010.png"
         ],
         "expected": {
-            "should_create_post": False,
+            "should_create_post": True,  # Double two star도 포스팅함
             "status": None,
             "user": "Saisai",
             "instance_id": "Saisai10",
             "friend_code": "9925206608231373"
+        }
+    },
+    
+    # === 실제 데이터 기반 Special Card Found 테스트 케이스들 ===
+    
+    "real_trainer_case_1": {
+        "type": "special",
+        "message": {
+            "content": """@MinMin Trainer found by 「NEQI ㆍ귀이이 1.•넅 (5536319345500719) in instance: 1 (1 packs, Palkia)
+File name: 20250606130619_1_Trainer_1_packs.xml
+Backing up to the Accounts\\SpecificCards folder and continuing...""",
+            "username": "「NEQI ㆍ귀이이 1.•넅"
+        },
+        "attachments": [
+            IMAGE_DIR.parent / "media2" / "20250606130619_1_Trainer_1_packs-7B74E.png",
+            IMAGE_DIR.parent / "media2" / "20250606130641_1_FRIENDCODE_1_packs-08C91.png"
+        ],
+        "expected": {
+            "should_create_post": True,
+            "status": "YET",
+            "user": "MinMin",
+            "instance_id": "「NEQI ㆍ귀이이 1.•넅",
+            "friend_code": "5536319345500719",
+            "card_type": "Trainer",
+            "packs": "1",
+            "open_pack": "Palkia"
+        }
+    },
+    
+    "real_trainer_case_2": {
+        "type": "special",
+        "message": {
+            "content": """@RKLB Trainer found by 들!,근의 ㆍ테이|:l !|년 (5494037701300243) in instance: 1 (2 packs, Buzzwole)
+File name: 20250606214431_1_Trainer_2_packs.xml
+Backing up to the Accounts\\SpecificCards folder and continuing...""",
+            "username": "들!,근의 ㆍ테이|:l !|년"
+        },
+        "attachments": [
+            IMAGE_DIR.parent / "media2" / "20250606214431_1_Trainer_2_packs-161E8.png",
+            IMAGE_DIR.parent / "media2" / "20250606214453_1_FRIENDCODE_2_packs-ED9A8.png"
+        ],
+        "expected": {
+            "should_create_post": True,
+            "status": "YET",
+            "user": "RKLB",
+            "instance_id": "들!,근의 ㆍ테이|:l !|년",
+            "friend_code": "5494037701300243",
+            "card_type": "Trainer",
+            "packs": "2",
+            "open_pack": "Buzzwole"
+        }
+    },
+    
+    "real_fullart_case": {
+        "type": "special",
+        "message": {
+            "content": """@1tori Full Art found by 「NEQI ㆍ귀이이 1.•넅 (3427135381459652) in instance: 4 (2 packs, Solgaleo)
+File name: 20250606224700_4_Full Art_2_packs.xml
+Backing up to the Accounts\\SpecificCards folder and continuing...""",
+            "username": "「NEQI ㆍ귀이이 1.•넅"
+        },
+        "attachments": [
+            IMAGE_DIR.parent / "media2" / "20250606224700_4_Full_Art_2_packs-D56F8.png",
+            IMAGE_DIR.parent / "media2" / "20250606224723_4_FRIENDCODE_2_packs-C9EC1.png"
+        ],
+        "expected": {
+            "should_create_post": True,
+            "status": "YET",
+            "user": "1tori",
+            "instance_id": "「NEQI ㆍ귀이이 1.•넅",
+            "friend_code": "3427135381459652",
+            "card_type": "Full Art",
+            "packs": "2",
+            "open_pack": "Solgaleo"
+        }
+    },
+    
+    "real_rainbow_case": {
+        "type": "special",
+        "message": {
+            "content": """@1tori Rainbow found by 「NEQI ㆍ귀이이 1.•넅 (0381638991048589) in instance: 2 (2 packs, Buzzwole)
+File name: 20250606224803_2_Rainbow_2_packs.xml
+Backing up to the Accounts\\SpecificCards folder and continuing...""",
+            "username": "「NEQI ㆍ귀이이 1.•넅"
+        },
+        "attachments": [
+            IMAGE_DIR.parent / "media2" / "20250606224803_2_Rainbow_2_packs-9E47B.png",
+            IMAGE_DIR.parent / "media2" / "20250606224826_2_FRIENDCODE_2_packs-2DCE6.png"
+        ],
+        "expected": {
+            "should_create_post": True,
+            "status": "YET",
+            "user": "1tori",
+            "instance_id": "「NEQI ㆍ귀이이 1.•넅",
+            "friend_code": "0381638991048589",
+            "card_type": "Rainbow",
+            "packs": "2",
+            "open_pack": "Buzzwole"
+        }
+    },
+    
+    "real_trainer_solgaleo": {
+        "type": "special",
+        "message": {
+            "content": """@RKLB Trainer found by 「NEQI ㆍ귀이이 1.•넅 (9668298884626731) in instance: 4 (1 packs, Solgaleo)
+File name: 20250606215459_4_Trainer_1_packs.xml
+Backing up to the Accounts\\SpecificCards folder and continuing...""",
+            "username": "「NEQI ㆍ귀이이 1.•넅"
+        },
+        "attachments": [
+            IMAGE_DIR.parent / "media2" / "20250606215459_4_Trainer_1_packs-8423B.png",
+            IMAGE_DIR.parent / "media2" / "20250606215523_4_FRIENDCODE_1_packs-2BB20.png"
+        ],
+        "expected": {
+            "should_create_post": True,
+            "status": "YET",
+            "user": "RKLB",
+            "instance_id": "「NEQI ㆍ귀이이 1.•넅",
+            "friend_code": "9668298884626731",
+            "card_type": "Trainer",
+            "packs": "1",
+            "open_pack": "Solgaleo"
         }
     }
 }
 
 # 빠른 테스트용 샘플 (각 타입별 1개씩)
 DETECT_QUICK_TEST_CASES = {
-    "valid": DETECT_MESSAGE_TEST_CASES["valid_godpack_1"],
+    "godpack": DETECT_MESSAGE_TEST_CASES["valid_godpack_1"],
     "invalid": DETECT_MESSAGE_TEST_CASES["invalid_godpack_1"],
-    "double_twostar": DETECT_MESSAGE_TEST_CASES["double_twostar_1"]
+    "double_twostar": DETECT_MESSAGE_TEST_CASES["double_twostar_1"],
+    "real_trainer": DETECT_MESSAGE_TEST_CASES["real_trainer_case_1"],
+    "real_fullart": DETECT_MESSAGE_TEST_CASES["real_fullart_case"],
+    "real_rainbow": DETECT_MESSAGE_TEST_CASES["real_rainbow_case"]
 }
 
 def get_detect_test_case(case_name):

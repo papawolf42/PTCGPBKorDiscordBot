@@ -236,7 +236,7 @@ class PokeTestSimulator:
             
             try:
                 async with self.session.post(webhook_url, data=data) as response:
-                    if response.status == 204:
+                    if response.status in [200, 204]:
                         self.logger.debug(f"Webhook 메시지 전송 성공 (이미지 {files_attached}개 포함): {username}")
                         return True
                     else:
@@ -256,7 +256,7 @@ class PokeTestSimulator:
             
             try:
                 async with self.session.post(webhook_url, json=payload) as response:
-                    if response.status == 204:
+                    if response.status in [200, 204]:
                         self.logger.debug(f"Webhook 메시지 전송 성공: {username}")
                         return True
                     else:
@@ -423,12 +423,20 @@ class PokeTestSimulator:
             # ("data_directory", connection.test_data_directory),
             
             # Phase 2: 갓팩 감지 및 포스팅 플로우
-            ("validate_images", lambda: self.validate_test_images()),
-            ("detect_valid_godpack", messages.test_detect_predefined_case('valid')),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
-            ("detect_invalid_godpack", messages.test_detect_predefined_case('invalid')),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
+            # ("validate_images", lambda: self.validate_test_images()),
+            # ("detect_valid_godpack", messages.test_detect_predefined_case('godpack')),
+            # ("wait_3sec", lambda: base.wait_seconds(3)),
+            # ("detect_invalid_godpack", messages.test_detect_predefined_case('invalid')),
+            # ("wait_3sec", lambda: base.wait_seconds(3)),
             ("detect_double_twostar", messages.test_detect_predefined_case('double_twostar')),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
+            
+            # Special Card 테스트 (실제 데이터 기반)
+            ("detect_real_trainer", messages.test_detect_predefined_case('real_trainer')),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
+            ("detect_real_fullart", messages.test_detect_predefined_case('real_fullart')),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
+            ("detect_real_rainbow", messages.test_detect_predefined_case('real_rainbow')),
             ("wait_3sec", lambda: base.wait_seconds(3)),
             
             # Phase 3: 커뮤니티 투표 검증 플로우

@@ -349,10 +349,10 @@ Opening: {opening}'''
                     'Detect 채널을 찾을 수 없음'
                 )
             
-            # 현재 godpack.json 항목 수 확인 (valid만 해당)
+            # 현재 godpack.json 항목 수 확인 (godpack과 special 해당)
             godpack_before = None
             entries_before = 0
-            if case_type == 'valid' and posting_channel:
+            if case_type in ['godpack', 'special'] and posting_channel:
                 godpack_before = self.read_json_file('poke_data/test/godpack.json') or {}
                 entries_before = len(godpack_before)
             
@@ -384,8 +384,10 @@ Opening: {opening}'''
                     'attachments': len(attachments)
                 }
                 
-                # Valid 갓팩의 경우 godpack.json 확인
-                if case_type == 'valid' and posting_channel:
+                # 갓팩 또는 Special Card의 경우 godpack.json 확인
+                # test_case의 실제 type 필드를 확인해야 함
+                actual_type = test_case.get('type', '')
+                if actual_type in ['godpack', 'special', 'double_twostar'] and posting_channel:
                     godpack_after = self.read_json_file('poke_data/test/godpack.json') or {}
                     entries_after = len(godpack_after)
                     new_entries = entries_after - entries_before

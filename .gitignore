@@ -37,6 +37,7 @@ scripts/testing/results/*.json
 # Data directories (민감한 사용자 데이터)
 data/
 data_test/
+DATA_DETECT
 
 # Temporary files
 *.tmp
@@ -49,3 +50,5 @@ data_test/
 dist/
 build/
 *.egg-info/
+
+PTCGPB/

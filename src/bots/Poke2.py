@@ -65,11 +65,26 @@ GROUP_CONFIGS = [
             "5P": int(os.getenv('DISCORD_GROUP7_TAG_5P')),
             "Notice": int(os.getenv('DISCORD_GROUP7_TAG_NOTICE'))
         }
+    },
+    {
+        "NAME": "GROUP8",
+        "HEARTBEAT_ID": int(os.getenv('DISCORD_GROUP8_HEARTBEAT_ID')),
+        "DETECT_ID": int(os.getenv('DISCORD_GROUP8_DETECT_ID')),
+        "POSTING_ID": int(os.getenv('DISCORD_GROUP8_POSTING_ID')),
+        "COMMAND_ID": int(os.getenv('DISCORD_GROUP8_COMMAND_ID')),
+        "MUSEUM_ID": int(os.getenv('DISCORD_GROUP8_MUSEUM_ID')),
+        "TAGS": {
+            "Yet": int(os.getenv('DISCORD_GROUP8_TAG_YET')),
+            "Good": int(os.getenv('DISCORD_GROUP8_TAG_GOOD')),
+            "Bad": int(os.getenv('DISCORD_GROUP8_TAG_BAD')),
+            "1P": int(os.getenv('DISCORD_GROUP8_TAG_1P')),
+            "2P": int(os.getenv('DISCORD_GROUP8_TAG_2P')),
+            "3P": int(os.getenv('DISCORD_GROUP8_TAG_3P')),
+            "4P": int(os.getenv('DISCORD_GROUP8_TAG_4P')),
+            "5P": int(os.getenv('DISCORD_GROUP8_TAG_5P')),
+            "Notice": int(os.getenv('DISCORD_GROUP8_TAG_NOTICE'))
+        }
     }
-    # 다른 그룹 설정을 여기에 딕셔너리로 추가
-    # {ez
-    #     "NAME": "Group7", ...
-    # },
 ]
 
 # --- 봇 설정 --- (Client -> Bot 변경)
