@@ -12,7 +12,7 @@ from discord import app_commands
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 # --- 상수 정의 ---
-DISCORD_TOKEN = "***REMOVED***" # 실제 봇 토큰으로 변경 필요
+DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')  # 환경변수에서 읽어옴
 # DATA_PATH 환경변수 사용
 DATA_PATH = os.getenv('DATA_PATH', 'data')
 VERIFIED_THREADS_FILE = os.path.join(DATA_PATH, "verified_threads.json") # 검증 스레드 데이터 저장 파일

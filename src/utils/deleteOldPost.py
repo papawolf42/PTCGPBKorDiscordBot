@@ -2,12 +2,13 @@ import discord
 import asyncio
 import time
 import re
+import os
 from datetime import datetime, timedelta, timezone
 import json
 import requests
 
 # Discord 설정
-DISCORD_TOKEN = "***REMOVED***"
+DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')  # 환경변수에서 읽어옴
 
 intents = discord.Intents.default()
 intents.messages = True

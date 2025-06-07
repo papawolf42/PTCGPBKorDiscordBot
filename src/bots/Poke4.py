@@ -3,13 +3,14 @@ from discord.ext import commands
 from discord import app_commands
 import logging
 import asyncio
+import os
 from typing import List # 타입 힌트용 추가
 
 # --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
 
 # --- 상수 정의 ---
-DISCORD_TOKEN = "***REMOVED***" # 실제 봇 토큰
+DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN')  # 환경변수에서 읽어옴
 YOUR_TEST_SERVER_ID = 1356169830126059520 # 실제 테스트 서버 ID
 
 # Poke2.py의 상수 일부 가져오기 (테스트용)
