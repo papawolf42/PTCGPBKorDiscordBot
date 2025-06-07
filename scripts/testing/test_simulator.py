@@ -415,6 +415,10 @@ class PokeTestSimulator:
         commands = CommandTests(self)
         base = BaseTestCase(self)
         
+        # Barrack 테스트 추가
+        from test_cases.messages_for_barrack import BarrackMessageTests
+        barrack = BarrackMessageTests(self)
+        
         # 테스트 목록
         tests = [
             # Phase 1: 연결 확인 (봇 시작 제외) - ✅ 완료
@@ -422,24 +426,31 @@ class PokeTestSimulator:
             # ("channel_access", connection.test_channel_access),
             # ("data_directory", connection.test_data_directory),
             
-            # Phase 2: 갓팩 감지 및 포스팅 플로우
+            # Phase 2: Barrack 버그 재현 테스트
+            ("setup_multiple_users", barrack.test_setup_multiple_users),
+            ("wait_5sec", lambda: base.wait_seconds(5)),
+            ("barrack_command", barrack.test_barrack_command),
+            ("wait_3sec", lambda: base.wait_seconds(3)),
+            ("verify_all_users", barrack.test_verify_all_users_shown),
+            
+            # Phase 3: 갓팩 감지 및 포스팅 플로우 (주석 처리)
             # ("validate_images", lambda: self.validate_test_images()),
             # ("detect_valid_godpack", messages.test_detect_predefined_case('godpack')),
             # ("wait_3sec", lambda: base.wait_seconds(3)),
             # ("detect_invalid_godpack", messages.test_detect_predefined_case('invalid')),
             # ("wait_3sec", lambda: base.wait_seconds(3)),
-            ("detect_double_twostar", messages.test_detect_predefined_case('double_twostar')),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
+            # ("detect_double_twostar", messages.test_detect_predefined_case('double_twostar')),
+            # ("wait_3sec", lambda: base.wait_seconds(3)),
             
-            # Special Card 테스트 (실제 데이터 기반)
-            ("detect_real_trainer", messages.test_detect_predefined_case('real_trainer')),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
-            ("detect_real_fullart", messages.test_detect_predefined_case('real_fullart')),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
-            ("detect_real_rainbow", messages.test_detect_predefined_case('real_rainbow')),
-            ("wait_3sec", lambda: base.wait_seconds(3)),
+            # Special Card 테스트 (실제 데이터 기반) - 주석 처리
+            # ("detect_real_trainer", messages.test_detect_predefined_case('real_trainer')),
+            # ("wait_3sec", lambda: base.wait_seconds(3)),
+            # ("detect_real_fullart", messages.test_detect_predefined_case('real_fullart')),
+            # ("wait_3sec", lambda: base.wait_seconds(3)),
+            # ("detect_real_rainbow", messages.test_detect_predefined_case('real_rainbow')),
+            # ("wait_3sec", lambda: base.wait_seconds(3)),
             
-            # Phase 3: 커뮤니티 투표 검증 플로우
+            # Phase 4: 커뮤니티 투표 검증 플로우
             # TODO: 포럼 포스트 반응 테스트 구현 예정
             # ("vote_good", messages.test_vote_good),
             # ("vote_bad", messages.test_vote_bad),

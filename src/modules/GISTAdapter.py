@@ -117,9 +117,13 @@ class TextAdapter:
             self.DATA.discard(text)
     
     def fetch_raw(self):
-        """호환성을 위한 메서드"""
-        self.load()
-        return self.DATA
+        """호환성을 위한 메서드 - GIST 동작 모방"""
+        # GIST는 항상 최신 데이터를 GitHub에서 가져오므로
+        # 여기서도 파일에서 직접 읽어서 반환
+        if os.path.exists(self.file_path):
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                return set(line.strip() for line in f if line.strip())
+        return set()
     
     def fetch_data(self):
         """호환성을 위한 메서드"""
